@@ -89,7 +89,7 @@ PURPLE   = '#a78bfa'
 # ── Data paths ────────────────────────────────────────────────────────────────
 DATA_DIR        = "data"
 PLAYERS_DIR     = os.path.join(DATA_DIR, "players")
-PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2.csv")
+PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
 WYSCOUT_L1_PT1  = os.path.join(DATA_DIR, "Lge_1_25_26_pt1.xlsx")
 WYSCOUT_L1_PT2  = os.path.join(DATA_DIR, "Lge_1_25_26_pt2.xlsx")
 WYSCOUT_L2_PT1  = os.path.join(DATA_DIR, "Lge_2_25_26_pt1.xlsx")
