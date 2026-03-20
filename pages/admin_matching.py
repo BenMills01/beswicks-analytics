@@ -19,8 +19,9 @@ st.set_page_config(
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 DATA_DIR       = "data"
-MATCHING_CSV   = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
-OVERRIDES_CSV  = os.path.join(DATA_DIR, "matching_overrides.csv")
+MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
+OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
+PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
 WYSCOUT_FILES  = [
     os.path.join(DATA_DIR, "Lge_1_25_26_pt1.xlsx"),
     os.path.join(DATA_DIR, "Lge_1_25_26_pt2.xlsx"),
