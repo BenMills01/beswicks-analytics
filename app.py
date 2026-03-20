@@ -77,6 +77,18 @@ st.markdown("""
     hr { border-color: #2a2a2a; margin: 20px 0; }
     .upload-prompt { text-align: center; padding: 60px 20px; color: #555; }
     .upload-prompt h2 { color: #888; font-size: 1.2rem; }
+    .mc-desc {
+        font-size: 0.65rem; color: #555; cursor: help; padding: 0 2px;
+        position: relative;
+    }
+    .mc-desc:hover::after {
+        content: attr(title);
+        position: absolute; right: 0; top: 18px; z-index: 999;
+        background: #222; color: #ccc; font-size: 0.7rem;
+        padding: 6px 10px; border-radius: 6px; width: 220px;
+        line-height: 1.5; border: 1px solid #333; white-space: normal;
+        pointer-events: none;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -88,6 +100,44 @@ GOLD     = '#c8a45a'
 BLUE     = '#3b82f6'
 RED      = '#f87171'
 GREEN    = '#4ade80'
+
+# ── Metric descriptions (plain English) ──────────────────────────────────────
+METRIC_DESC = {
+    "Total dist p90":    "Total metres covered per 90 minutes. Measures overall work rate and engine.",
+    "HSR dist p90":      "High-speed running distance (above ~20km/h) per 90 mins. Key indicator of athletic capacity.",
+    "Sprint dist p90":   "Distance covered at sprint pace (above ~25km/h) per 90 mins. Measures explosive speed use.",
+    "PSV99 avg":         "Peak Sprint Velocity — average of the player's top speed across matches. Higher = faster.",
+    "COD count p90":     "Changes of direction per 90 mins. Reflects agility and positional movement.",
+    "Goals p90":         "Goals scored per 90 minutes played.",
+    "Assists p90":       "Assists (final pass before a goal) per 90 minutes.",
+    "xG p90":            "Expected goals per 90 mins — the quality of chances created or taken, not just shots.",
+    "xA p90":            "Expected assists per 90 mins — measures the quality of chances the player creates for teammates.",
+    "Shot asts p90":     "Passes that directly led to a shot, per 90 mins. Broader creativity measure than assists.",
+    "Touches in box":    "Times the player received the ball inside the opposition penalty area per 90 mins.",
+    "Dribbles p90":      "Dribble attempts per 90 mins. Reflects willingness to take on opponents.",
+    "Prog runs p90":     "Ball carries that advance the team significantly up the pitch, per 90 mins.",
+    "Passes p90":        "Total pass attempts per 90 mins. Higher volume = greater involvement in build-up.",
+    "Long pass p90":     "Long pass attempts per 90 mins. Relevant for switching play or playing over the press.",
+    "Crosses p90":       "Cross attempts per 90 mins from wide areas.",
+    "Duels p90":         "Total physical contests per 90 mins — includes all defensive and offensive duels.",
+    "Aerial p90":        "Aerial duels contested per 90 mins. Heading battles in both boxes.",
+    "Def duels p90":     "Defensive duel attempts per 90 mins — one-v-one defensive actions.",
+    "Interceptions":     "Times the player intercepts an opposition pass per 90 mins.",
+    "Recoveries p90":    "Times the player wins possession from a loose ball or turnover, per 90 mins.",
+    "Losses p90":        "Times the player loses the ball per 90 mins. Lower is better for most positions.",
+    "Pass acc %":        "Percentage of passes that reach a teammate. Higher = more reliable on the ball.",
+    "Duel win %":        "Percentage of all duels won. Above 50% means winning more than losing.",
+    "Aerial win %":      "Percentage of aerial duels won.",
+    "Def duel win %":    "Percentage of defensive duels won. Key for assessing defensive reliability.",
+    "Dribble success %": "Percentage of dribble attempts that are completed successfully.",
+    "Pressures received p90": "Times the player was pressed by an opponent per 90 mins.",
+    "Ball retention under press": "Percentage of times the player kept the ball when under pressure.",
+    "Pass completion under press": "Pass accuracy specifically when under immediate pressure from an opponent.",
+    "Runs per match":    "Off-ball runs made per match — movement to create space or receive the ball.",
+    "Dangerous runs":    "Runs made into high-threat areas (e.g. in behind the defence) per match.",
+    "Runs targeted":     "Times teammates attempted to play the ball to the player's runs.",
+    "Runs received":     "Times the player actually received the ball after making a run.",
+}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def p90(value, minutes):
@@ -126,16 +176,26 @@ def metric_card(label, value, sub='', vcls='', pct_val=None, peer_n=None):
         c = pct_colour(pct_val)
         w = f"{pct_val:.0f}%"
         peer_str = f" · n={peer_n}" if peer_n else ""
-        pct_section = f"""
-        <div class="pbar-track"><div class="pbar-fill" style="width:{w};background:{c};"></div></div>
-        <div class="mc-pct" style="color:{c};">{ordinal(pct_val)} percentile{peer_str}</div>"""
-    return f"""
-    <div class="mc {vcls}">
-        <div class="mc-label">{label}</div>
-        <div class="mc-value">{value}</div>
-        {'<div class="mc-sub">' + sub + '</div>' if sub else ''}
-        {pct_section}
-    </div>"""
+        pct_section = (
+            f'<div class="pbar-track"><div class="pbar-fill" style="width:{w};background:{c};"></div></div>'
+            f'<div class="mc-pct" style="color:{c};">{ordinal(pct_val)} percentile{peer_str}</div>'
+        )
+    desc = METRIC_DESC.get(label, '')
+    desc_html = f'<div class="mc-desc" title="{desc}">ⓘ</div>' if desc else ''
+    sub_html = f'<div class="mc-sub">{sub}</div>' if sub else ''
+    return (
+        f'<div class="mc {vcls}">' +
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start">' +
+        f'<div class="mc-label">{label}</div>{desc_html}</div>' +
+        f'<div class="mc-value">{value}</div>' +
+        sub_html + pct_section +
+        '</div>'
+    )
+
+def metric_row(cards_html):
+    """Wrap multiple metric_card outputs in a flex row — renders as single markdown call."""
+    inner = "".join(cards_html)
+    return f'<div style="display:grid;grid-template-columns:repeat({len(cards_html)},1fr);gap:10px;margin-bottom:8px">{inner}</div>'
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 def load_data(file):
@@ -437,67 +497,61 @@ st.markdown('<div class="section-header">Seasonal metrics · per 90</div>', unsa
 # Physical output — percentiles from SkillCorner peer file when available
 if phys:
     st.markdown("**Physical output**")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    for col, label, val, sub, key in [
-        (c1, "Total dist p90",  f"{int(phys['total_dist_p90']):,}m",  "SkillCorner", 'total_dist_p90'),
-        (c2, "HSR dist p90",    f"{int(phys['hsr_dist_p90'])}m",      f"{phys['hsr_count_p90']:.0f} reps", 'hsr_dist_p90'),
-        (c3, "Sprint dist p90", f"{int(phys['sprint_dist_p90'])}m",   f"{phys['sprint_count_p90']:.0f} sprints", 'sprint_dist_p90'),
-        (c4, "PSV99 avg",       str(phys['psv99_avg']),                f"Peak: {phys['psv99_max']}", 'psv99_avg'),
-        (c5, "COD count p90",   f"{phys['cod_p90']:.0f}",             "Changes of direction", None),
-    ]:
-        pct_val = gp(key, phys.get(key)) if key else None
-        col.markdown(metric_card(label, val, sub, 'mc-good', pct_val, peer_n), unsafe_allow_html=True)
+    phys_cards = [
+        metric_card("Total dist p90",  f"{int(phys['total_dist_p90']):,}m",  "SkillCorner",                      'mc-good', gp('total_dist_p90',  phys.get('total_dist_p90')),  peer_n),
+        metric_card("HSR dist p90",    f"{int(phys['hsr_dist_p90'])}m",      f"{phys['hsr_count_p90']:.0f} reps",'mc-good', gp('hsr_dist_p90',    phys.get('hsr_dist_p90')),    peer_n),
+        metric_card("Sprint dist p90", f"{int(phys['sprint_dist_p90'])}m",   f"{phys['sprint_count_p90']:.0f} sprints", 'mc-good', gp('sprint_dist_p90', phys.get('sprint_dist_p90')), peer_n),
+        metric_card("PSV99 avg",       str(phys['psv99_avg']),                f"Peak: {phys['psv99_max']}",       'mc-good', gp('psv99_avg',       phys.get('psv99_avg')),        peer_n),
+        metric_card("COD count p90",   f"{phys['cod_p90']:.0f}",             "Changes of direction",             'mc-good', None, None),
+    ]
+    st.markdown(metric_row(phys_cards), unsafe_allow_html=True)
 
 # Attacking
 st.markdown("**Attacking output**")
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-for col, label, val, sub, vcls, key, inv in [
-    (c1, "Goals p90",      f"{season['goals_p90']:.2f}",      f"{season['goals_raw']} raw",   "mc-good" if season['goals_raw'] >= 2 else "", 'goals_p90',       False),
-    (c2, "Assists p90",    f"{season['assists_p90']:.2f}",    f"{season['assists_raw']} raw", "",                                            'assists_p90',     False),
-    (c3, "xG p90",         f"{season['xg_p90']:.2f}",         "",                             "",                                            'xg_p90',          False),
-    (c4, "xA p90",         f"{season['xa_p90']:.2f}",         "",                             "",                                            'xa_p90',          False),
-    (c5, "Shot asts p90",  f"{season['shot_asts_p90']:.2f}",  "",                             "mc-good" if season['shot_asts_p90'] > 0.5 else "", 'shot_asts_p90', False),
-    (c6, "Touches in box", f"{season['touches_box_p90']:.2f}","per 90",                       "",                                            'touches_box_p90', False),
-]:
-    col.markdown(metric_card(label, val, sub, vcls, gp(key, season.get(key), inv), peer_n), unsafe_allow_html=True)
+atk_cards = [
+    metric_card("Goals p90",      f"{season['goals_p90']:.2f}",       f"{season['goals_raw']} raw",   "mc-good" if season['goals_raw'] >= 2 else "", gp('goals_p90',       season.get('goals_p90')),       peer_n),
+    metric_card("Assists p90",    f"{season['assists_p90']:.2f}",     f"{season['assists_raw']} raw", "",                                            gp('assists_p90',     season.get('assists_p90')),     peer_n),
+    metric_card("xG p90",         f"{season['xg_p90']:.2f}",          "",                             "",                                            gp('xg_p90',          season.get('xg_p90')),          peer_n),
+    metric_card("xA p90",         f"{season['xa_p90']:.2f}",          "",                             "",                                            gp('xa_p90',          season.get('xa_p90')),          peer_n),
+    metric_card("Shot asts p90",  f"{season['shot_asts_p90']:.2f}",   "",                             "mc-good" if season['shot_asts_p90'] > 0.5 else "", gp('shot_asts_p90', season.get('shot_asts_p90')), peer_n),
+    metric_card("Touches in box", f"{season['touches_box_p90']:.2f}", "per 90",                       "",                                            gp('touches_box_p90', season.get('touches_box_p90')), peer_n),
+]
+st.markdown(metric_row(atk_cards), unsafe_allow_html=True)
 
 # Passing
 st.markdown("**Passing & ball-carrying**")
-c1, c2, c3, c4, c5 = st.columns(5)
 pa = season['pass_acc']
-for col, label, val, sub, vcls, key, inv in [
-    (c1, "Passes p90",    f"{season['passes_p90']:.1f}",      f"{pa:.1f}% accuracy" if pa else "", "mc-good" if pa and pa > 80 else "mc-warn" if pa and pa > 70 else "mc-bad", 'passes_p90', False),
-    (c2, "Long pass p90", f"{season['long_passes_p90']:.2f}", f"{season['lp_acc']:.1f}% acc" if season['lp_acc'] else "", "", 'long_passes_p90', False),
-    (c3, "Crosses p90",   f"{season['crosses_p90']:.2f}",     "",                                 "",                                            'crosses_p90',     False),
-    (c4, "Dribbles p90",  f"{season['dribbles_p90']:.2f}",    f"{season['drib_pct']:.1f}% success" if season['drib_pct'] else "", "mc-good" if season['drib_pct'] and season['drib_pct'] > 60 else "", 'dribbles_p90', False),
-    (c5, "Prog runs p90", f"{season['prog_runs_p90']:.2f}",   "",                                 "",                                            'prog_runs_p90',   False),
-]:
-    col.markdown(metric_card(label, val, sub, vcls, gp(key, season.get(key), inv), peer_n), unsafe_allow_html=True)
+pass_cards = [
+    metric_card("Passes p90",    f"{season['passes_p90']:.1f}",      f"{pa:.1f}% accuracy" if pa else "",          "mc-good" if pa and pa > 80 else "mc-warn" if pa and pa > 70 else "mc-bad", gp('passes_p90',    season.get('passes_p90')),    peer_n),
+    metric_card("Long pass p90", f"{season['long_passes_p90']:.2f}", f"{season['lp_acc']:.1f}% acc" if season['lp_acc'] else "", "",                                                               gp('long_passes_p90', season.get('long_passes_p90')), peer_n),
+    metric_card("Crosses p90",   f"{season['crosses_p90']:.2f}",     "",                                            "",                                                                           gp('crosses_p90',   season.get('crosses_p90')),   peer_n),
+    metric_card("Dribbles p90",  f"{season['dribbles_p90']:.2f}",    f"{season['drib_pct']:.1f}% success" if season['drib_pct'] else "", "mc-good" if season['drib_pct'] and season['drib_pct'] > 60 else "", gp('dribbles_p90', season.get('dribbles_p90')), peer_n),
+    metric_card("Prog runs p90", f"{season['prog_runs_p90']:.2f}",   "",                                            "",                                                                           gp('prog_runs_p90', season.get('prog_runs_p90')),  peer_n),
+]
+st.markdown(metric_row(pass_cards), unsafe_allow_html=True)
 
 # Defensive
 st.markdown("**Defensive output**")
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-for col, label, val, sub, vcls, key, inv in [
-    (c1, "Duels p90",      f"{season['duels_p90']:.1f}",        f"{season['duel_win']:.1f}% win rate",   "mc-warn" if season['duel_win'] and season['duel_win'] < 55 else "mc-good", 'duels_p90',         False),
-    (c2, "Aerial p90",     f"{season['aerial_p90']:.2f}",       f"{season['aerial_win']:.1f}% win rate" if season['aerial_win'] else "", "", 'aerial_p90', False),
-    (c3, "Def duels p90",  f"{season['def_duels_p90']:.2f}",    f"{season['def_duel_win']:.1f}% win rate" if season['def_duel_win'] else "", "mc-warn" if season['def_duel_win'] and season['def_duel_win'] < 60 else "mc-good", 'def_duels_p90', False),
-    (c4, "Interceptions",  f"{season['interceptions_p90']:.2f}","per 90",                                 "mc-good" if season['interceptions_p90'] > 4 else "", 'interceptions_p90', False),
-    (c5, "Recoveries p90", f"{season['recoveries_p90']:.2f}",   f"Opp half: {season['rec_opp_p90']:.2f}","",                                                   'recoveries_p90',    False),
-    (c6, "Losses p90",     f"{season['losses_p90']:.2f}",       f"Own half: {season['losses_oh_p90']:.2f}", "mc-bad" if season['losses_p90'] > 12 else "mc-warn", 'losses_p90',    True),
-]:
-    col.markdown(metric_card(label, val, sub, vcls, gp(key, season.get(key), inv), peer_n), unsafe_allow_html=True)
+def_cards = [
+    metric_card("Duels p90",      f"{season['duels_p90']:.1f}",         f"{season['duel_win']:.1f}% win rate",                                         "mc-warn" if season['duel_win'] and season['duel_win'] < 55 else "mc-good", gp('duels_p90',         season.get('duels_p90')),         peer_n),
+    metric_card("Aerial p90",     f"{season['aerial_p90']:.2f}",        f"{season['aerial_win']:.1f}% win rate" if season['aerial_win'] else "",         "",                                                                       gp('aerial_p90',        season.get('aerial_p90')),        peer_n),
+    metric_card("Def duels p90",  f"{season['def_duels_p90']:.2f}",     f"{season['def_duel_win']:.1f}% win rate" if season['def_duel_win'] else "",     "mc-warn" if season['def_duel_win'] and season['def_duel_win'] < 60 else "mc-good", gp('def_duels_p90', season.get('def_duels_p90')), peer_n),
+    metric_card("Interceptions",  f"{season['interceptions_p90']:.2f}", "per 90",                                                                        "mc-good" if season['interceptions_p90'] > 4 else "",                    gp('interceptions_p90', season.get('interceptions_p90')), peer_n),
+    metric_card("Recoveries p90", f"{season['recoveries_p90']:.2f}",    f"Opp half: {season['rec_opp_p90']:.2f}",                                        "",                                                                       gp('recoveries_p90',    season.get('recoveries_p90')),    peer_n),
+    metric_card("Losses p90",     f"{season['losses_p90']:.2f}",        f"Own half: {season['losses_oh_p90']:.2f}",                                      "mc-bad" if season['losses_p90'] > 12 else "mc-warn",                    gp('losses_p90',        season.get('losses_p90'), True),  peer_n),
+]
+st.markdown(metric_row(def_cards), unsafe_allow_html=True)
 
 # Win rates
 st.markdown("**Win rates & accuracy**")
-c1, c2, c3, c4, c5 = st.columns(5)
-for col, label, val, sub, vcls, key, inv in [
-    (c1, "Pass acc %",        f"{season['pass_acc']:.1f}%" if season['pass_acc'] else "–",       f"{season['passes_p90']:.1f} passes p90",     "mc-good" if pa and pa > 80 else "mc-warn", 'pass_acc',     False),
-    (c2, "Duel win %",        f"{season['duel_win']:.1f}%" if season['duel_win'] else "–",       f"{season['duels_p90']:.1f} duels p90",        "mc-warn" if season['duel_win'] and season['duel_win'] < 55 else "mc-good", 'duel_win', False),
-    (c3, "Aerial win %",      f"{season['aerial_win']:.1f}%" if season['aerial_win'] else "–",   f"{season['aerial_p90']:.1f} aerials p90",     "", 'aerial_win',   False),
-    (c4, "Def duel win %",    f"{season['def_duel_win']:.1f}%" if season['def_duel_win'] else "–",f"{season['def_duels_p90']:.1f} def duels",   "mc-warn" if season['def_duel_win'] and season['def_duel_win'] < 60 else "mc-good", 'def_duel_win', False),
-    (c5, "Dribble success %", f"{season['drib_pct']:.1f}%" if season['drib_pct'] else "–",       f"{season['dribbles_p90']:.1f} dribbles p90", "mc-good" if season['drib_pct'] and season['drib_pct'] > 60 else "", 'drib_pct', False),
-]:
-    col.markdown(metric_card(label, val, sub, vcls, gp(key, season.get(key), inv), peer_n), unsafe_allow_html=True)
+win_cards = [
+    metric_card("Pass acc %",        f"{season['pass_acc']:.1f}%" if season['pass_acc'] else "–",        f"{season['passes_p90']:.1f} passes p90",      "mc-good" if pa and pa > 80 else "mc-warn",                                        gp('pass_acc',     season.get('pass_acc')),     peer_n),
+    metric_card("Duel win %",        f"{season['duel_win']:.1f}%" if season['duel_win'] else "–",        f"{season['duels_p90']:.1f} duels p90",         "mc-warn" if season['duel_win'] and season['duel_win'] < 55 else "mc-good",        gp('duel_win',    season.get('duel_win')),     peer_n),
+    metric_card("Aerial win %",      f"{season['aerial_win']:.1f}%" if season['aerial_win'] else "–",    f"{season['aerial_p90']:.1f} aerials p90",      "",                                                                                 gp('aerial_win',  season.get('aerial_win')),   peer_n),
+    metric_card("Def duel win %",    f"{season['def_duel_win']:.1f}%" if season['def_duel_win'] else "–",f"{season['def_duels_p90']:.1f} def duels",     "mc-warn" if season['def_duel_win'] and season['def_duel_win'] < 60 else "mc-good", gp('def_duel_win', season.get('def_duel_win')), peer_n),
+    metric_card("Dribble success %", f"{season['drib_pct']:.1f}%" if season['drib_pct'] else "–",       f"{season['dribbles_p90']:.1f} dribbles p90",   "mc-good" if season['drib_pct'] and season['drib_pct'] > 60 else "",               gp('drib_pct',    season.get('drib_pct')),     peer_n),
+]
+st.markdown(metric_row(win_cards), unsafe_allow_html=True)
 
 # Pressing
 pressing_raw = sheets.get('Pressing')
@@ -598,9 +652,13 @@ if ph is not None and len(ph) > 0:
         fig = go.Figure()
         fig.add_bar(x=ph['match_label'], y=ph['dist_p90'],
                     marker_color=[GOLD if v >= avg_dist else '#333' for v in ph['dist_p90']],
-                    name='Total dist p90', hovertemplate='%{y:,.0f}m<extra></extra>')
+                    name=f'{name} dist p90', hovertemplate='%{y:,.0f}m<extra></extra>')
         fig.add_scatter(x=ph['match_label'], y=[avg_dist]*len(ph), mode='lines',
-                        name=f'Avg ({avg_dist:,.0f}m)', line=dict(color=RED, width=1.5, dash='dot'), hoverinfo='skip')
+                        name=f'Player avg ({avg_dist:,.0f}m)', line=dict(color=GOLD, width=1.5, dash='dot'), hoverinfo='skip')
+        if 'total_dist_p90' in peer_data:
+            league_avg_dist = peer_data['total_dist_p90'].mean()
+            fig.add_scatter(x=ph['match_label'], y=[league_avg_dist]*len(ph), mode='lines',
+                            name=f'League avg ({league_avg_dist:,.0f}m)', line=dict(color='#888', width=1.5, dash='dash'), hoverinfo='skip')
         fig.update_layout(**base_layout('Total distance per 90 (m)', height=300))
         fig.update_yaxes(range=[8000, ph['dist_p90'].max() * 1.05])
         st.plotly_chart(fig, use_container_width=True)
@@ -609,7 +667,11 @@ if ph is not None and len(ph) > 0:
         fig2.add_bar(x=ph['match_label'], y=ph['hsr_p90'],    name='HSR dist p90',    marker_color=BLUE, hovertemplate='HSR: %{y:.0f}m<extra></extra>')
         fig2.add_bar(x=ph['match_label'], y=ph['sprint_p90'], name='Sprint dist p90', marker_color='rgba(200,164,90,0.53)', hovertemplate='Sprint: %{y:.0f}m<extra></extra>')
         fig2.add_scatter(x=ph['match_label'], y=[avg_hsr]*len(ph), mode='lines',
-                         name=f'HSR avg ({avg_hsr:.0f}m)', line=dict(color=BLUE, width=1.5, dash='dot'), hoverinfo='skip')
+                         name=f'Player HSR avg ({avg_hsr:.0f}m)', line=dict(color=BLUE, width=1.5, dash='dot'), hoverinfo='skip')
+        if 'hsr_dist_p90' in peer_data:
+            league_avg_hsr = peer_data['hsr_dist_p90'].mean()
+            fig2.add_scatter(x=ph['match_label'], y=[league_avg_hsr]*len(ph), mode='lines',
+                             name=f'League HSR avg ({league_avg_hsr:.0f}m)', line=dict(color='#888', width=1.5, dash='dash'), hoverinfo='skip')
         fig2.update_layout(**base_layout('HSR & sprint distance per 90 (m)', height=300), barmode='group')
         st.plotly_chart(fig2, use_container_width=True)
     with tab3:
@@ -655,7 +717,7 @@ with ftab1:
     if 'duel_win' in peer_data:
         pavg = peer_data['duel_win'].mean()
         fig_d.add_scatter(x=ws['match_label'], y=[pavg]*len(ws), mode='lines',
-                          name=f'Peer avg ({pavg:.0f}%)', line=dict(color=GOLD, width=1.5, dash='dot'), hoverinfo='skip')
+                          name=f'League avg ({pavg:.0f}%)', line=dict(color='#888', width=1.5, dash='dash'), hoverinfo='skip')
     fig_d.update_layout(**base_layout('Duel win % (all & defensive)', height=320))
     fig_d.update_yaxes(range=[0, 115])
     st.plotly_chart(fig_d, use_container_width=True)
@@ -679,7 +741,12 @@ with ftab3:
                   marker_color=[RED if v >= 18 else 'rgba(200,164,90,0.53)' if v >= 14 else '#333' for v in ws['losses_p90_m']],
                   hovertemplate='Losses p90: %{y:.1f}<extra></extra>', secondary_y=False)
     fig_l.add_scatter(x=ws['match_label'], y=[avg_loss]*len(ws), mode='lines', name=f'Avg ({avg_loss:.1f})',
-                      line=dict(color='#555', width=1.5, dash='dot'), hoverinfo='skip', secondary_y=False)
+                      line=dict(color=GOLD, width=1.5, dash='dot'), hoverinfo='skip', secondary_y=False)
+    if 'losses_p90' in peer_data:
+        league_avg_loss = peer_data['losses_p90'].mean()
+        fig_l.add_scatter(x=ws['match_label'], y=[league_avg_loss]*len(ws), mode='lines',
+                          name=f'League avg ({league_avg_loss:.1f})', secondary_y=False,
+                          line=dict(color='#888', width=1.5, dash='dash'), hoverinfo='skip')
     fig_l.add_scatter(x=ws['match_label'], y=ws['pass_acc_pct'], mode='lines+markers', name='Pass acc %',
                       line=dict(color=GREEN, width=1.5), marker=dict(size=4), connectgaps=True,
                       hovertemplate='Pass acc: %{y:.0f}%<extra></extra>', secondary_y=True)
@@ -956,3 +1023,183 @@ else:
                     st.info("Upload a peer group file with matching columns to enable the percentile comparison chart.")
 
                 st.markdown("</div>", unsafe_allow_html=True)
+
+# ── League rankings view ───────────────────────────────────────────────────────
+if peer_df is not None:
+    st.markdown('<div class="section-header">League rankings · vs full peer group</div>', unsafe_allow_html=True)
+
+    # Detect peer file type
+    peer_cols = list(peer_df.columns)
+    is_sc_peer = 'dist_p90' in peer_cols
+
+    # Build rankings config depending on data source
+    if is_sc_peer:
+        RANK_METRICS = [
+            ('Total dist p90',   'dist_p90',           False, '{:.0f}m',  'total_dist_p90'),
+            ('HSR dist p90',     'hsr_dist_p90',        False, '{:.0f}m',  'hsr_dist_p90'),
+            ('Sprint dist p90',  'sprint_dist_p90',     False, '{:.0f}m',  'sprint_dist_p90'),
+            ('HSR runs p90',     'count_hsr_p90',       False, '{:.1f}',   'hsr_count_p90'),
+            ('Sprint runs p90',  'count_sprint_p90',    False, '{:.1f}',   'sprint_count_p90'),
+            ('High accels p90',  'count_high_accel_p90',False, '{:.1f}',   'high_accel_p90'),
+            ('Top speed (avg)',  'top_speed_avg',       False, '{:.2f}',   'psv99_avg'),
+        ]
+        name_col = 'player_name'
+        client_val_key = {
+            'dist_p90':            phys.get('total_dist_p90')  if phys else None,
+            'hsr_dist_p90':        phys.get('hsr_dist_p90')    if phys else None,
+            'sprint_dist_p90':     phys.get('sprint_dist_p90') if phys else None,
+            'count_hsr_p90':       phys.get('hsr_count_p90')   if phys else None,
+            'count_sprint_p90':    phys.get('sprint_count_p90')if phys else None,
+            'count_high_accel_p90':phys.get('high_accel_p90')  if phys else None,
+            'top_speed_avg':       phys.get('psv99_avg')        if phys else None,
+        }
+    else:
+        # Wyscout peer group
+        min_col = next((c for c in ['Minutes played', 'minutes_played'] if c in peer_cols), None)
+        RANK_METRICS = [
+            ('Goals p90',       'Goals',                  False, '{:.2f}', 'goals_p90'),
+            ('xG p90',          'xG',                     False, '{:.2f}', 'xg_p90'),
+            ('Interceptions',   'Interceptions',          False, '{:.2f}', 'interceptions_p90'),
+            ('Duels p90',       'Duels',                  False, '{:.1f}', 'duels_p90'),
+            ('Passes p90',      'Passes',                 False, '{:.1f}', 'passes_p90'),
+            ('Losses p90',      'Losses',                 True,  '{:.2f}', 'losses_p90'),
+        ]
+        name_col = next((c for c in ['Player', 'player_name', 'Name'] if c in peer_cols), None)
+        client_val_key = {}
+
+    if name_col is None:
+        st.warning("Could not identify player name column in peer group file.")
+    else:
+        # ── CSS for the rankings table ────────────────────────────────────────
+        st.markdown("""
+        <style>
+        .rank-grid { display: grid; gap: 20px; margin-top: 8px; }
+        .rank-col { background: #111; border-radius: 10px; padding: 14px 16px; }
+        .rank-col-title {
+            font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em;
+            text-transform: uppercase; color: #c8a45a; margin-bottom: 12px;
+            padding-bottom: 6px; border-bottom: 1px solid #2a2a2a;
+        }
+        .rank-row {
+            display: flex; align-items: center; gap: 6px;
+            padding: 2px 0; font-size: 0.72rem;
+        }
+        .rank-num {
+            color: #555; min-width: 20px; text-align: right;
+            font-size: 0.65rem; font-variant-numeric: tabular-nums;
+        }
+        .rank-name { color: #aaa; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .rank-bar-wrap { width: 90px; background: #222; border-radius: 2px; height: 5px; }
+        .rank-bar { height: 5px; border-radius: 2px; background: #444; }
+        .rank-val { color: #666; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+        .rank-highlight .rank-num  { color: #c8a45a; font-weight: 700; }
+        .rank-highlight .rank-name { color: #ffffff; font-weight: 700; }
+        .rank-highlight .rank-bar  { background: #c8a45a !important; }
+        .rank-highlight .rank-val  { color: #c8a45a; font-weight: 700; }
+        .sample-note { font-size: 0.68rem; color: #444; margin-top: 16px; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # ── Build each ranking column ─────────────────────────────────────────
+        # Work out how many columns to show per row (max 4)
+        valid_metrics = []
+        for label, col, inverse, fmt, client_key in RANK_METRICS:
+            if col not in peer_df.columns:
+                continue
+            col_data = pd.to_numeric(peer_df[col], errors='coerce')
+            if col_data.notna().sum() < 3:
+                continue
+            valid_metrics.append((label, col, inverse, fmt, client_key))
+
+        if not valid_metrics:
+            st.info("No matching metric columns found in peer group file.")
+        else:
+            cols_per_row = min(4, len(valid_metrics))
+            rows_needed  = (len(valid_metrics) + cols_per_row - 1) // cols_per_row
+
+            for row_i in range(rows_needed):
+                chunk = valid_metrics[row_i * cols_per_row:(row_i + 1) * cols_per_row]
+                st_cols = st.columns(len(chunk))
+
+                for ci, (label, col, inverse, fmt, client_key) in enumerate(chunk):
+                    col_series = pd.to_numeric(peer_df[col], errors='coerce')
+                    names      = peer_df[name_col].astype(str)
+
+                    # Sort: highest first unless inverse
+                    sorted_idx = col_series.sort_values(ascending=inverse).index
+                    sorted_vals  = col_series[sorted_idx].values
+                    sorted_names = names[sorted_idx].values
+                    max_val = sorted_vals[0] if not inverse else sorted_vals[-1]
+                    max_val = max(max_val, 0.001)
+
+                    # Get client value
+                    c_val = client_val_key.get(col) if is_sc_peer else season.get(client_key)
+
+                    # Find client rank (insert if not in peer list)
+                    client_rank = None
+                    if c_val is not None:
+                        if inverse:
+                            rank = int((col_series < c_val).sum()) + 1
+                        else:
+                            rank = int((col_series > c_val).sum()) + 1
+                        client_rank = rank
+                        total = len(col_series.dropna()) + 1
+                    else:
+                        total = len(col_series.dropna())
+
+                    # Build HTML rows — show top N, inject client if outside top N
+                    MAX_ROWS = 20
+                    show_rows = []
+                    client_injected = False
+
+                    for rank_i, (rname, rval) in enumerate(zip(sorted_names, sorted_vals)):
+                        if pd.isna(rval):
+                            continue
+                        rank_n = rank_i + 1
+                        is_client = (c_val is not None and abs(float(rval) - float(c_val)) < 0.01
+                                     and rname == name)
+
+                        if rank_n <= MAX_ROWS:
+                            show_rows.append((rank_n, rname, rval, is_client))
+                            if is_client:
+                                client_injected = True
+                        elif is_client:
+                            show_rows.append((rank_n, rname, rval, True))
+                            client_injected = True
+
+                    # If client not found by name match, inject by rank position
+                    if not client_injected and c_val is not None and client_rank is not None:
+                        if client_rank > MAX_ROWS:
+                            show_rows.append((client_rank, name, c_val, True))
+                        else:
+                            # Insert at correct position
+                            insert_pos = min(client_rank - 1, len(show_rows))
+                            show_rows.insert(insert_pos, (client_rank, name, c_val, True))
+                            client_injected = True
+
+                    # Render HTML
+                    rows_html = []
+                    for rank_n, rname, rval, is_client in show_rows:
+                        bar_w = max(2, int(abs(float(rval)) / max_val * 90))
+                        val_str = fmt.format(float(rval))
+                        display_name = f"<strong>{rname}</strong>" if is_client else rname
+                        rank_str = f"<strong>{rank_n}.</strong>" if is_client else f"{rank_n}."
+                        hl = ' rank-highlight' if is_client else ''
+                        rows_html.append(
+                            f'<div class="rank-row{hl}">'
+                            f'<span class="rank-num">{rank_str}</span>'
+                            f'<span class="rank-name">{display_name}</span>'
+                            f'<span class="rank-bar-wrap"><span class="rank-bar" style="width:{bar_w}px"></span></span>'
+                            f'<span class="rank-val">{val_str}</span>'
+                            f'</div>'
+                        )
+
+                    rank_label = f"{label} <span style='color:#555;font-size:0.6rem'>({total} players)</span>"
+                    html_block = (
+                        f'<div class="rank-col">'
+                        f'<div class="rank-col-title">{rank_label}</div>'
+                        + ''.join(rows_html)
+                        + f'<div class="sample-note">Sample: {peer_n} players · {min_mins_peer}+ mins</div>'
+                        f'</div>'
+                    )
+                    st_cols[ci].markdown(html_block, unsafe_allow_html=True)
