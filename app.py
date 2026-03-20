@@ -87,13 +87,16 @@ GREEN    = '#4ade80'
 PURPLE   = '#a78bfa'
 
 # ── Data paths ────────────────────────────────────────────────────────────────
-DATA_DIR       = "data"
-PLAYERS_DIR    = os.path.join(DATA_DIR, "players")
-PHYSICAL_CSV   = os.path.join(DATA_DIR, "physical_l1_l2.csv")
-WYSCOUT_L1_PT1 = os.path.join(DATA_DIR, "Lge_1_25_26_pt1.xlsx")
-WYSCOUT_L1_PT2 = os.path.join(DATA_DIR, "Lge_1_25_26_pt2.xlsx")
-WYSCOUT_L2_PT1 = os.path.join(DATA_DIR, "Lge_2_25_26_pt1.xlsx")
-WYSCOUT_L2_PT2 = os.path.join(DATA_DIR, "Lge_2_25_26_pt2.xlsx")
+DATA_DIR        = "data"
+PLAYERS_DIR     = os.path.join(DATA_DIR, "players")
+PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2.csv")
+WYSCOUT_L1_PT1  = os.path.join(DATA_DIR, "Lge_1_25_26_pt1.xlsx")
+WYSCOUT_L1_PT2  = os.path.join(DATA_DIR, "Lge_1_25_26_pt2.xlsx")
+WYSCOUT_L2_PT1  = os.path.join(DATA_DIR, "Lge_2_25_26_pt1.xlsx")
+WYSCOUT_L2_PT2  = os.path.join(DATA_DIR, "Lge_2_25_26_pt2.xlsx")
+MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
+OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
+CONF_THRESHOLD  = 0.85  # below this, matching file entry is ignored unless overridden
 
 # ── Metric descriptions ───────────────────────────────────────────────────────
 METRIC_DESC = {
@@ -275,6 +278,43 @@ def load_wyscout_league():
             df['_league'] = 'League One' if 'Lge_1' in p else 'League Two'
             dfs.append(df)
     return pd.concat(dfs, ignore_index=True) if dfs else None
+
+@st.cache_data
+def load_matching():
+    """Load the SkillCorner↔Wyscout matching file — one row per player (best match score)."""
+    if not os.path.exists(MATCHING_CSV): return None
+    df = pd.read_csv(MATCHING_CSV)
+    return (
+        df.sort_values('wyscout_match_score', ascending=False)
+        .drop_duplicates(subset='sc_player_id')
+        .reset_index(drop=True)
+    )
+
+def load_overrides():
+    """Load manual overrides CSV — not cached so admin edits apply immediately."""
+    if not os.path.exists(OVERRIDES_CSV):
+        return pd.DataFrame(columns=['sc_player_id','skillcorner_name','wyscout_name','wyscout_team','notes','updated_at'])
+    return pd.read_csv(OVERRIDES_CSV)
+
+def resolve_wyscout_name(sc_player_id, fallback_short_name, matching_df, overrides_df):
+    """
+    Return the correct Wyscout abbreviated name for a SkillCorner player.
+    Priority: manual override → high-confidence match (>=0.85) → fallback short name.
+    Returns (wyscout_name, source) where source is 'override'|'matching'|'fallback'.
+    """
+    if overrides_df is not None and len(overrides_df):
+        ov = overrides_df[overrides_df['sc_player_id'] == sc_player_id]
+        if len(ov):
+            return ov.iloc[0]['wyscout_name'], 'override'
+    if matching_df is not None:
+        row = matching_df[matching_df['sc_player_id'] == sc_player_id]
+        if len(row):
+            r = row.iloc[0]
+            score = r['wyscout_match_score']
+            if pd.notna(score) and float(score) >= CONF_THRESHOLD and pd.notna(r['wyscout_name']):
+                return r['wyscout_name'], 'matching'
+    return fallback_short_name, 'fallback'
+
 
 def process_wyscout(df):
     return df[df['Minutes played'] >= 20].copy().sort_values('Date').reset_index(drop=True)
@@ -482,9 +522,11 @@ st.markdown("""
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 with st.spinner(f"Loading {selected_name}..."):
-    sheets    = load_master(selected_path)
-    phys_csv  = load_physical_csv()
-    league_df = load_wyscout_league()
+    sheets       = load_master(selected_path)
+    phys_csv     = load_physical_csv()
+    league_df    = load_wyscout_league()
+    matching_df  = load_matching()
+    overrides_df = load_overrides()
 
 ws_raw = sheets.get('Wyscout')
 ph_raw = sheets.get('Physical')
@@ -500,11 +542,16 @@ phys   = get_physical_totals(ph) if ph is not None else None
 # ── Metadata ──────────────────────────────────────────────────────────────────
 if ph_raw is not None and 'player_name' in ph_raw.columns:
     full_name      = ph_raw['player_name'].iloc[0]
-    short_name     = ph_raw['player_short_name'].iloc[0] if 'player_short_name' in ph_raw.columns else selected_name
+    fallback_short = ph_raw['player_short_name'].iloc[0] if 'player_short_name' in ph_raw.columns else selected_name
+    sc_player_id   = int(ph_raw['sc_player_id'].iloc[0]) if 'sc_player_id' in ph_raw.columns else None
     position_group = ph_raw['position_group'].iloc[0]    if 'position_group'    in ph_raw.columns else None
     club_from_file = ph_raw['team_name'].iloc[0]         if 'team_name'         in ph_raw.columns else ""
 else:
-    full_name=selected_name; short_name=selected_name; position_group=None; club_from_file=""
+    full_name=selected_name; fallback_short=selected_name
+    sc_player_id=None; position_group=None; club_from_file=""
+
+# Resolve correct Wyscout name: override > high-confidence match > fallback
+short_name, match_source = resolve_wyscout_name(sc_player_id, fallback_short, matching_df, overrides_df)
 
 name    = full_name
 club    = player_club    or club_from_file
@@ -559,7 +606,8 @@ with c1:
         st.markdown('<div class="peer-banner peer-banner-warn">⚠ Physical peer group unavailable — try relaxing filters</div>', unsafe_allow_html=True)
 with c2:
     if ws_peer_n > 0:
-        st.markdown(f'<div class="peer-banner">✓ Wyscout peers · {ws_peer_n} players · {peer_desc}</div>', unsafe_allow_html=True)
+        source_badge = {'override':'🔧 override','matching':'🔗 matched','fallback':'⚠ fallback'}.get(match_source,'')
+        st.markdown(f'<div class="peer-banner">✓ Wyscout peers · {ws_peer_n} players · {peer_desc} · <b>{short_name}</b> {source_badge}</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="peer-banner peer-banner-warn">⚠ Wyscout peer group unavailable — try relaxing filters</div>', unsafe_allow_html=True)
 
