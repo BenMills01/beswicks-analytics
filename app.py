@@ -948,14 +948,14 @@ ws = ws[ws['Competition'].str.contains('League One|League Two', na=False)].sort_
 ws['match_label']      = ws.apply(lambda r: parse_wyscout_label(r['Match'], club or club_from_file), axis=1)
 ws['duel_win_pct']     = ws.apply(lambda r: pct(r.iloc[21],r['Duels']),          axis=1)
 ws['def_duel_win_pct'] = ws.apply(lambda r: pct(r.iloc[32],r.iloc[31]),           axis=1)
-ws['losses_p90_m']     = ws.apply(lambda r: p90(r['Losses'],r['Minutes played']), axis=1)
-ws['ptf3_p90_m']       = ws.apply(lambda r: p90(r['Passes to final third'],r['Minutes played']), axis=1)
-ws['shot_ast_p90_m']   = ws.apply(lambda r: p90(r['Shot assists'],r['Minutes played']),          axis=1)
-ws['pass_acc_pct']     = ws.apply(lambda r: pct(r.iloc[13],r['Passes']),          axis=1)
-ws['def_duels_p90_m']  = ws.apply(lambda r: p90(r.iloc[31],r['Minutes played']),  axis=1)
-ws['aerial_p90_m']     = ws.apply(lambda r: p90(r['Aerial duels'],r['Minutes played']), axis=1)
-ws['int_p90_m']        = ws.apply(lambda r: p90(r['Interceptions'],r['Minutes played']), axis=1)
-ws['rec_p90_m']        = ws.apply(lambda r: p90(r['Recoveries'],r['Minutes played']), axis=1)
+ws['losses_raw']       = ws['Losses'].fillna(0)
+ws['ptf3_raw']         = ws['Passes to final third'].fillna(0)
+ws['shot_ast_raw']     = ws['Shot assists'].fillna(0)
+ws['pass_acc_pct']     = ws.apply(lambda r: pct(r.iloc[13],r['Passes']), axis=1)
+ws['def_duels_raw']    = ws.iloc[:,31].fillna(0)
+ws['aerial_raw']       = ws['Aerial duels'].fillna(0)
+ws['int_raw']          = ws['Interceptions'].fillna(0)
+ws['rec_raw']          = ws['Recoveries'].fillna(0)
 ws_mins = ws['Minutes played']
 ws_opac = mins_to_opacity(ws_mins)
 
@@ -986,72 +986,68 @@ with ftab1:
 
 with ftab2:
     fig_a=go.Figure()
-    fig_a.add_bar(x=ws['match_label'],y=ws['ptf3_p90_m'],name='PTF3 p90',
+    fig_a.add_bar(x=ws['match_label'],y=ws['ptf3_raw'],name='PTF3',
         marker_color=colour_list(BLUE,ws_opac),
-        customdata=ws_mins,hovertemplate='%{x}<br>PTF3 p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>')
-    fig_a.add_bar(x=ws['match_label'],y=ws['shot_ast_p90_m'],name='Shot asts p90',
+        customdata=ws_mins,hovertemplate='%{x}<br>PTF3: %{y:.0f} · %{customdata:.0f} mins<extra></extra>')
+    fig_a.add_bar(x=ws['match_label'],y=ws['shot_ast_raw'],name='Shot assists',
         marker_color=colour_list(GREEN,ws_opac),
-        customdata=ws_mins,hovertemplate='%{x}<br>Shot asts p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>')
-    fig_a.add_scatter(x=ws['match_label'],y=rolling_avg(ws['shot_ast_p90_m']),mode='lines',
+        customdata=ws_mins,hovertemplate='%{x}<br>Shot asts: %{y:.0f} · %{customdata:.0f} mins<extra></extra>')
+    fig_a.add_scatter(x=ws['match_label'],y=rolling_avg(ws['shot_ast_raw']),mode='lines',
         name='Shot asts rolling avg',line=dict(color=PURPLE,width=2),
         hovertemplate='Rolling avg: %{y:.1f}<extra></extra>')
     goal_games=ws[ws['Goals']>0]
     if len(goal_games)>0:
-        fig_a.add_scatter(x=goal_games['match_label'],y=[ws['ptf3_p90_m'].max()*1.1]*len(goal_games),
+        fig_a.add_scatter(x=goal_games['match_label'],y=[ws['ptf3_raw'].max()*1.1]*len(goal_games),
             mode='markers',name='Goal scored',marker=dict(symbol='star',size=14,color=GOLD),
             hovertemplate='⭐ Goal<extra></extra>')
-    fig_a.update_layout(**base_layout('Attacking output per 90',height=340),barmode='group')
+    fig_a.update_layout(**base_layout('Attacking output · per game',height=340),barmode='group')
     st.plotly_chart(fig_a,use_container_width=True)
 
 with ftab3:
     fig_def = make_subplots(specs=[[{"secondary_y": True}]])
     avg_def  = ws['def_duels_p90_m'].mean()
     avg_aer  = ws['aerial_p90_m'].mean()
-    fig_def.add_bar(x=ws['match_label'], y=ws['def_duels_p90_m'], name='Def duels p90',
+    fig_def.add_bar(x=ws['match_label'], y=ws['def_duels_raw'], name='Def duels',
         marker_color=colour_list(BLUE, ws_opac),
-        customdata=ws_mins, hovertemplate='%{x}<br>Def duels p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>',
+        customdata=ws_mins, hovertemplate='%{x}<br>Def duels: %{y:.0f} · %{customdata:.0f} mins<extra></extra>',
         secondary_y=False)
-    fig_def.add_bar(x=ws['match_label'], y=ws['aerial_p90_m'], name='Aerial duels p90',
+    fig_def.add_bar(x=ws['match_label'], y=ws['aerial_raw'], name='Aerial duels',
         marker_color=colour_list(GOLD, ws_opac),
-        customdata=ws_mins, hovertemplate='%{x}<br>Aerial p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>',
+        customdata=ws_mins, hovertemplate='%{x}<br>Aerials: %{y:.0f} · %{customdata:.0f} mins<extra></extra>',
         secondary_y=False)
-    fig_def.add_scatter(x=ws['match_label'], y=ws['int_p90_m'], mode='lines+markers', name='Interceptions p90',
+    fig_def.add_scatter(x=ws['match_label'], y=ws['int_raw'], mode='lines+markers', name='Interceptions',
         line=dict(color=GREEN, width=2), marker=dict(size=5), connectgaps=True,
-        hovertemplate='%{x}<br>Int p90: %{y:.1f}<extra></extra>', secondary_y=True)
-    fig_def.add_scatter(x=ws['match_label'], y=rolling_avg(ws['def_duels_p90_m']), mode='lines',
+        hovertemplate='%{x}<br>Int: %{y:.0f}<extra></extra>', secondary_y=True)
+    fig_def.add_scatter(x=ws['match_label'], y=rolling_avg(ws['def_duels_raw']), mode='lines',
         name='Def duels rolling avg', line=dict(color=PURPLE, width=2), connectgaps=True,
         hovertemplate='Rolling avg: %{y:.1f}<extra></extra>', secondary_y=False)
-    if 'def_duels_p90' in ws_peers:
-        pavg_dd = ws_peers['def_duels_p90'].mean()
-        fig_def.add_scatter(x=ws['match_label'], y=[pavg_dd]*len(ws), mode='lines',
-            name=f'Position def duels avg ({pavg_dd:.1f})', line=dict(color='#888', width=1.5, dash='dash'),
-            hoverinfo='skip', secondary_y=False)
-    fig_def.update_layout(**base_layout('Defensive output per 90', height=340), barmode='group')
-    fig_def.update_yaxes(secondary_y=True, title_text='Interceptions p90', showgrid=False,
+
+    fig_def.update_layout(**base_layout('Defensive output · per game', height=340), barmode='group')
+    fig_def.update_yaxes(secondary_y=True, title_text='Interceptions', showgrid=False,
         title_font=dict(size=10, color='#555'))
     st.plotly_chart(fig_def, use_container_width=True)
 
 with ftab4:
-    avg_loss=ws['losses_p90_m'].mean()
+    avg_loss=ws['losses_raw'].mean()
     def loss_col(v,o):
         if v>=18:   return rgba(RED,o)
         elif v>=14: return rgba(GOLD,o)
         else:       return rgba('#333333',o)
-    loss_cols=[loss_col(ws['losses_p90_m'].iloc[i],ws_opac[i]) for i in range(len(ws))]
+    loss_cols=[loss_col(ws['losses_raw'].iloc[i],ws_opac[i]) for i in range(len(ws))]
     fig_l=make_subplots(specs=[[{"secondary_y":True}]])
-    fig_l.add_bar(x=ws['match_label'],y=ws['losses_p90_m'],name='Losses p90',
+    fig_l.add_bar(x=ws['match_label'],y=ws['losses_raw'],name='Losses',
         marker_color=loss_cols,
-        customdata=ws_mins,hovertemplate='%{x}<br>Losses p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>',
+        customdata=ws_mins,hovertemplate='%{x}<br>Losses: %{y:.0f} · %{customdata:.0f} mins<extra></extra>',
         secondary_y=False)
-    fig_l.add_scatter(x=ws['match_label'],y=[avg_loss]*len(ws),mode='lines',name=f'Player avg ({avg_loss:.1f})',
+    fig_l.add_scatter(x=ws['match_label'],y=[avg_loss]*len(ws),mode='lines',name=f'Avg ({avg_loss:.0f})',
         line=dict(color=GOLD,width=1.5,dash='dot'),hoverinfo='skip',secondary_y=False)
-    fig_l.add_scatter(x=ws['match_label'],y=rolling_avg(ws['losses_p90_m']),mode='lines',
+    fig_l.add_scatter(x=ws['match_label'],y=rolling_avg(ws['losses_raw']),mode='lines',
         name='Losses rolling avg',line=dict(color=PURPLE,width=2),connectgaps=True,
         hovertemplate='Rolling avg: %{y:.1f}<extra></extra>',secondary_y=False)
     fig_l.add_scatter(x=ws['match_label'],y=ws['pass_acc_pct'],mode='lines+markers',name='Pass acc %',
         line=dict(color=GREEN,width=1.5),marker=dict(size=4),connectgaps=True,
         hovertemplate='%{x}<br>Pass acc: %{y:.0f}%<extra></extra>',secondary_y=True)
-    fig_l.update_layout(**base_layout('Losses per 90 & passing accuracy',height=340))
+    fig_l.update_layout(**base_layout('Losses per game & passing accuracy',height=340))
     fig_l.update_yaxes(secondary_y=True,title_text='Pass acc %',showgrid=False,
         range=[40,105],title_font=dict(size=10,color='#555'))
     st.plotly_chart(fig_l,use_container_width=True)
