@@ -657,10 +657,21 @@ age_val = player_age
 ws_pos_key = find_player_position_file(short_name) if short_name else None
 
 # ── Override season metrics with league file values where more accurate ────────
-# Some metrics (e.g. Successful defensive actions) are computed differently in the
-# league export vs the master file. Where a league file value exists, use it.
+# Always look up the player's OWN league (not the peer filter) so the stat
+# doesn't change when the user toggles the league filter.
 if ws_pos_key and short_name:
-    pos_df = load_wyscout_position_file(ws_pos_key, peer_league)
+    # Determine which league the player actually plays in
+    player_league_key = None
+    for _league in ['League One', 'League Two']:
+        _path = WS_FILES.get(_league, {}).get(ws_pos_key)
+        if _path and os.path.exists(_path):
+            _df = pd.read_excel(_path)
+            if short_name in _df['Player'].values:
+                player_league_key = _league
+                break
+    # Load that specific league file (not the peer filter)
+    _lookup_league = player_league_key if player_league_key else peer_league
+    pos_df = load_wyscout_position_file(ws_pos_key, _lookup_league)
     if pos_df is not None:
         player_row = pos_df[pos_df['Player'] == short_name]
         if len(player_row) > 0:
