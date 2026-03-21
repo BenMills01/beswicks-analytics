@@ -1084,115 +1084,164 @@ st.markdown('<div class="section-header">League rankings · vs position peer gro
 
 def build_ranking_chart(metric_label, peer_series, player_value, player_name, higher_is_better=True, fmt='.2f'):
     """
-    Horizontal bar chart showing all peers ranked, client player highlighted in gold.
-    Returns a Plotly figure.
+    Horizontal bar chart: top 20 players ranked 1st at top.
+    Client player highlighted in gold.
+    If client is outside top 20, show top 20 then a gap then client at bottom with their rank.
     """
     if peer_series is None or player_value is None:
         return None
 
-    # Build dataframe of all peers + the player
-    peer_vals = peer_series.dropna().reset_index(drop=True)
-    if len(peer_vals) < 3:
+    all_vals = peer_series.dropna().reset_index(drop=True)
+    if len(all_vals) < 3:
         return None
 
-    # Create combined df — add player if not already in series
-    df_rank = pd.DataFrame({'value': peer_vals, 'label': 'peer'})
+    # Build full ranked list (1st = best)
+    df_all = pd.DataFrame({'value': all_vals})
+    df_all = df_all.sort_values('value', ascending=not higher_is_better).reset_index(drop=True)
+    df_all['rank'] = df_all.index + 1
+    total = len(df_all)
 
-    # Sort: highest first for normal metrics, lowest first for inverse
-    df_rank = df_rank.sort_values('value', ascending=higher_is_better).reset_index(drop=True)
+    # Find client rank (closest value match)
+    client_rank_idx = (df_all['value'] - player_value).abs().idxmin()
+    client_rank     = int(df_all.loc[client_rank_idx, 'rank'])
+    client_in_top20 = client_rank <= 20
 
-    # Find where player sits (nearest value match)
-    player_rank_idx = (df_rank['value'] - player_value).abs().idxmin()
-    total = len(df_rank)
-    rank_num = total - player_rank_idx if higher_is_better else player_rank_idx + 1
+    # Build display rows
+    top20 = df_all.head(20).copy()
+    top20['is_client'] = top20['value'].apply(lambda v: abs(v - player_value) < 1e-9)
 
-    # Colours: gold for player, grey for peers, colour-coded by percentile band
-    pct_val = percentile_rank(player_value, peer_series, inverse=not higher_is_better)
-
+    # If client is in top 20, mark them; otherwise add separator + client row
+    rows        = []
     bar_colours = []
-    for i, row in df_rank.iterrows():
-        if abs(row['value'] - player_value) < 0.001:
-            bar_colours.append(GOLD)
-        else:
-            pv = percentile_rank(row['value'], peer_series, inverse=not higher_is_better)
-            bar_colours.append('#2a2a2a')
+    y_labels    = []
+    values      = []
+    is_separator = []
+
+    for _, r in top20.iterrows():
+        is_client = bool(r['is_client'])
+        rows.append(r)
+        values.append(r['value'])
+        y_labels.append(f"{int(r['rank'])}.")
+        bar_colours.append(GOLD if is_client else '#2e2e2e')
+        is_separator.append(False)
+
+    if not client_in_top20:
+        # Gap row (zero-length, invisible)
+        values.append(0)
+        y_labels.append('···')
+        bar_colours.append('rgba(0,0,0,0)')
+        is_separator.append(True)
+        # Client row
+        values.append(player_value)
+        y_labels.append(f"{client_rank}.")
+        bar_colours.append(GOLD)
+        is_separator.append(False)
+
+    n_rows     = len(values)
+    row_height = 22
+    fig_height = n_rows * row_height + 50
+
+    # Build figure — y axis is categorical so bars are in display order
+    # We reverse so rank 1 is at top
+    y_pos    = list(range(n_rows - 1, -1, -1))  # reversed so top of chart = rank 1
 
     fig = go.Figure()
     fig.add_bar(
-        x=df_rank['value'],
-        y=list(range(len(df_rank))),
+        x=values,
+        y=y_pos,
         orientation='h',
-        marker_color=bar_colours,
-        hovertemplate=f'%{{x:{fmt}}}<extra></extra>',
+        marker=dict(
+            color=bar_colours,
+            line=dict(width=0),
+        ),
+        text=[f'{v:{fmt}}' if not is_separator[i] else '' for i, v in enumerate(values)],
+        textposition='outside',
+        textfont=dict(size=9, color=[GOLD if c == GOLD else '#666' for c in bar_colours]),
+        hovertemplate='%{text}<extra></extra>',
         showlegend=False,
-    )
-    # Player value line
-    fig.add_vline(
-        x=player_value,
-        line=dict(color=GOLD, width=2, dash='dot'),
+        cliponaxis=False,
     )
 
-    # Rank annotation
-    rank_label = f"{ordinal(int(pct_val))} pct" if pct_val else ""
-    fig.add_annotation(
-        x=player_value, y=len(df_rank),
-        text=f"<b>{player_value:{fmt}}</b>  {rank_label}",
-        showarrow=False,
-        font=dict(color=GOLD, size=10),
-        xanchor='left', yanchor='bottom',
-        xshift=5,
-    )
-
+    # Y-axis tick labels (rank numbers)
     fig.update_layout(
-        title=dict(text=metric_label, font=dict(color=TEXT_COL, size=11, family='Inter'), x=0),
-        height=max(160, min(len(df_rank) * 6 + 60, 320)),
-        plot_bgcolor=PLOT_BG, paper_bgcolor=PLOT_BG,
-        margin=dict(l=4, r=12, t=28, b=20),
-        xaxis=dict(gridcolor=GRID_COL, showgrid=True, tickfont=dict(size=8, color='#555'), zeroline=False),
-        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+        title=dict(
+            text=f'<b>{metric_label}</b>',
+            font=dict(color='#ccc', size=10, family='Inter'),
+            x=0, xanchor='left',
+        ),
+        height=fig_height,
+        plot_bgcolor=PLOT_BG,
+        paper_bgcolor=PLOT_BG,
+        margin=dict(l=28, r=50, t=26, b=8),
+        xaxis=dict(
+            showgrid=False, showticklabels=False,
+            zeroline=False, showline=False,
+            range=[0, max(v for v in values if v > 0) * 1.25] if any(v > 0 for v in values) else [0, 1],
+        ),
+        yaxis=dict(
+            tickmode='array',
+            tickvals=y_pos,
+            ticktext=y_labels,
+            tickfont=dict(size=9, color='#555'),
+            showgrid=False, zeroline=False,
+        ),
         hoverlabel=dict(bgcolor='#1a1a1a', font_size=10),
     )
+
+    # Highlight client row with a gold left border via shape
+    if client_in_top20:
+        client_y = y_pos[client_rank - 1]
+    else:
+        client_y = 0  # bottom row
+
+    fig.add_shape(
+        type='rect',
+        x0=0, x1=max(v for v in values if v > 0) * 1.25 if any(v > 0 for v in values) else 1,
+        y0=client_y - 0.45, y1=client_y + 0.45,
+        fillcolor='rgba(200,164,90,0.08)',
+        line=dict(width=0),
+        layer='below',
+    )
+
     return fig
 
 # ── Define which metrics to rank ──────────────────────────────────────────────
 RANKING_METRICS = []
 
-# Wyscout metrics
 if ws_peer_n >= 5:
     WS_RANK_METRICS = [
-        ('Goals p90',        'goals_p90',        True,  '.2f'),
-        ('xG p90',           'xg_p90',           True,  '.2f'),
-        ('Assists p90',      'assists_p90',       True,  '.2f'),
-        ('xA p90',           'xa_p90',            True,  '.2f'),
-        ('Shot asts p90',    'shot_asts_p90',     True,  '.2f'),
-        ('Touches box p90',  'touches_box_p90',   True,  '.2f'),
-        ('Prog runs p90',    'prog_runs_p90',     True,  '.2f'),
-        ('Dribbles p90',     'dribbles_p90',      True,  '.2f'),
-        ('Passes p90',       'passes_p90',        True,  '.1f'),
-        ('Pass acc %',       'pass_acc',          True,  '.1f'),
-        ('Crosses p90',      'crosses_p90',       True,  '.2f'),
-        ('Duels p90',        'duels_p90',         True,  '.1f'),
-        ('Duel win %',       'duel_win',          True,  '.1f'),
-        ('Aerial p90',       'aerial_p90',        True,  '.2f'),
-        ('Aerial win %',     'aerial_win',        True,  '.1f'),
-        ('Def duels p90',    'def_duels_p90',     True,  '.2f'),
-        ('Def duel win %',   'def_duel_win',      True,  '.1f'),
-        ('Interceptions p90','interceptions_p90', True,  '.2f'),
-        ('Recoveries p90',   'recoveries_p90',    True,  '.2f'),
-        ('Losses p90',       'losses_p90',        False, '.2f'),
+        ('Goals p90',         'goals_p90',         True,  '.2f'),
+        ('xG p90',            'xg_p90',            True,  '.2f'),
+        ('Assists p90',       'assists_p90',        True,  '.2f'),
+        ('xA p90',            'xa_p90',             True,  '.2f'),
+        ('Shot asts p90',     'shot_asts_p90',      True,  '.2f'),
+        ('Touches box p90',   'touches_box_p90',    True,  '.2f'),
+        ('Prog runs p90',     'prog_runs_p90',      True,  '.2f'),
+        ('Dribbles p90',      'dribbles_p90',       True,  '.2f'),
+        ('Passes p90',        'passes_p90',         True,  '.1f'),
+        ('Pass acc %',        'pass_acc',           True,  '.1f'),
+        ('Crosses p90',       'crosses_p90',        True,  '.2f'),
+        ('Duels p90',         'duels_p90',          True,  '.1f'),
+        ('Duel win %',        'duel_win',           True,  '.1f'),
+        ('Aerial p90',        'aerial_p90',         True,  '.2f'),
+        ('Aerial win %',      'aerial_win',         True,  '.1f'),
+        ('Def duels p90',     'def_duels_p90',      True,  '.2f'),
+        ('Def duel win %',    'def_duel_win',       True,  '.1f'),
+        ('Interceptions p90', 'interceptions_p90',  True,  '.2f'),
+        ('Recoveries p90',    'recoveries_p90',     True,  '.2f'),
+        ('Losses p90',        'losses_p90',         False, '.2f'),
     ]
     for label, key, higher, fmt in WS_RANK_METRICS:
         if key in ws_peers and season.get(key) is not None:
             RANKING_METRICS.append((label, ws_peers[key], season[key], higher, fmt, 'ws'))
 
-# Physical metrics
 if phys_peer_n >= 5 and phys is not None:
     PHYS_RANK_METRICS = [
-        ('Total dist p90',   'total_dist_p90',   True,  ',.0f'),
-        ('HSR dist p90',     'hsr_dist_p90',     True,  '.0f'),
-        ('Sprint dist p90',  'sprint_dist_p90',  True,  '.0f'),
-        ('PSV99 avg',        'psv99_avg',         True,  '.2f'),
-        ('High accel p90',   'hi_accel_p90',     True,  '.1f'),
+        ('Total dist p90',  'total_dist_p90',  True, ',.0f'),
+        ('HSR dist p90',    'hsr_dist_p90',    True, '.0f'),
+        ('Sprint dist p90', 'sprint_dist_p90', True, '.0f'),
+        ('PSV99 avg',       'psv99_avg',        True, '.2f'),
+        ('High accel p90',  'hi_accel_p90',    True, '.1f'),
     ]
     for label, key, higher, fmt in PHYS_RANK_METRICS:
         if key in phys_peers and phys.get(key) is not None:
@@ -1201,19 +1250,16 @@ if phys_peer_n >= 5 and phys is not None:
 if not RANKING_METRICS:
     st.markdown('<div class="peer-banner peer-banner-warn">⚠ No peer data available for ranking charts — check peer group filters</div>', unsafe_allow_html=True)
 else:
-    # Show toggle for metric group
     rank_group = st.radio("Show", ["All", "Wyscout", "Physical"], horizontal=True, key="rank_group")
-
     filtered_metrics = [m for m in RANKING_METRICS if
         rank_group == "All" or
         (rank_group == "Wyscout"  and m[5] == 'ws') or
         (rank_group == "Physical" and m[5] == 'phys')
     ]
-
-    st.caption(f"Showing {len(filtered_metrics)} metrics · {ws_peer_n} position peers · gold bar = {name} · bars sorted by value")
+    peer_n_display = ws_peer_n if rank_group in ("All","Wyscout") else phys_peer_n
+    st.caption(f"Top 20 shown per metric · {peer_n_display} position peers · {name} highlighted in gold · if outside top 20 shown at bottom with rank")
     st.markdown("")
 
-    # Render in 3-column grid
     cols_per_row = 3
     for row_start in range(0, len(filtered_metrics), cols_per_row):
         row_metrics = filtered_metrics[row_start:row_start + cols_per_row]
@@ -1223,7 +1269,6 @@ else:
             if fig:
                 with cols[col_idx]:
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
