@@ -251,10 +251,12 @@ def colour_list(hex_col, opacities):
     return [rgba(hex_col, o) for o in opacities]
 
 # ── Player file discovery ─────────────────────────────────────────────────────
-@st.cache_data
 def get_player_list():
-    files = sorted(glob.glob(os.path.join(PLAYERS_DIR, "*_master.xlsx")))
-    return [(os.path.basename(f).replace("_master.xlsx","").replace("_"," "), f) for f in files]
+    """Scan data/players/ for master Excel files. No cache so new files appear immediately."""
+    abs_dir = os.path.abspath(PLAYERS_DIR)
+    pattern = os.path.join(abs_dir, "*_master.xlsx")
+    files   = sorted(glob.glob(pattern))
+    return [(os.path.basename(f).replace("_master.xlsx","").replace("_"," "), f) for f in files], abs_dir, pattern
 
 # ── Data loaders ──────────────────────────────────────────────────────────────
 @st.cache_data
@@ -482,9 +484,10 @@ def build_match_log(ws, team_name):
 with st.sidebar:
     st.markdown("## ⚽ Beswicks Sports")
     st.markdown("---")
-    player_list = get_player_list()
+    player_list, _scan_dir, _pattern = get_player_list()
     if not player_list:
-        st.warning("No player files found in `data/players/`.")
+        st.warning(f"No player files found.")
+        st.code(f"Scanning: {_scan_dir}\nPattern:  {_pattern}\nExists:   {os.path.exists(_scan_dir)}\nContents: {os.listdir(_scan_dir) if os.path.exists(_scan_dir) else 'N/A'}")
         st.stop()
     player_names  = [p[0] for p in player_list]
     selected_name = st.selectbox("Select player", player_names)
