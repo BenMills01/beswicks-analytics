@@ -23,10 +23,22 @@ MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
 OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
 PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
 WYSCOUT_FILES  = [
-    os.path.join(DATA_DIR, "Lge_1_25_26_pt1.xlsx"),
-    os.path.join(DATA_DIR, "Lge_1_25_26_pt2.xlsx"),
-    os.path.join(DATA_DIR, "Lge_2_25_26_pt1.xlsx"),
-    os.path.join(DATA_DIR, "Lge_2_25_26_pt2.xlsx"),
+    os.path.join(DATA_DIR, "League_One_min_874_mins.xlsx"),
+    os.path.join(DATA_DIR, "League_One_Central_Defenders.xlsx"),
+    os.path.join(DATA_DIR, "League_One_Full_Back_Wing_Back.xlsx"),
+    os.path.join(DATA_DIR, "League_One_Central_Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League_One_Attacking_Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League_One_Wide_Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League_One_CF_s.xlsx"),
+    os.path.join(DATA_DIR, "League_One_GKs.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_min_874_mins.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_Central_Defenders.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_FB_WB.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_Central_Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_Attacking_Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_Wide_Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_CFs.xlsx"),
+    os.path.join(DATA_DIR, "League_Two_GKs.xlsx"),
 ]
 
 CONF_THRESHOLD = 0.85  # below this → flagged as low confidence
@@ -178,6 +190,20 @@ def find_wyscout_candidates(name_hint, team_hint=None, n=8):
         if len(team_hits) > 0:
             hits = team_hits
     return hits[['Player','Team','Position','Minutes played','_league']].drop_duplicates(subset=['Player','Team']).head(n)
+
+# ── Unsaved overrides warning ─────────────────────────────────────────────────
+if len(overrides) > 0:
+    warning_html = (
+        f"<div style='background:#1a0a00;border:1px solid #c8a45a;border-radius:8px;"
+        f"padding:12px 16px;margin:0 0 16px;font-size:0.8rem;color:#c8a45a;'>"
+        f"<b>Remember to commit your overrides to GitHub.</b><br>"
+        f"<span style='color:#888;font-size:0.75rem;'>"
+        f"You have {len(overrides)} override(s) saved this session. They will be lost when the app reboots "
+        f"unless you download the CSV and commit it to <code>data/matching_overrides.csv</code> in your GitHub repo. "
+        f"Go to the Overrides tab to download."
+        f"</span></div>"
+    )
+    st.markdown(warning_html, unsafe_allow_html=True)
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab_fix, tab_overrides, tab_all = st.tabs([
