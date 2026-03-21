@@ -952,12 +952,16 @@ ws['losses_p90_m']     = ws.apply(lambda r: p90(r['Losses'],r['Minutes played'])
 ws['ptf3_p90_m']       = ws.apply(lambda r: p90(r['Passes to final third'],r['Minutes played']), axis=1)
 ws['shot_ast_p90_m']   = ws.apply(lambda r: p90(r['Shot assists'],r['Minutes played']),          axis=1)
 ws['pass_acc_pct']     = ws.apply(lambda r: pct(r.iloc[13],r['Passes']),          axis=1)
+ws['def_duels_p90_m']  = ws.apply(lambda r: p90(r.iloc[31],r['Minutes played']),  axis=1)
+ws['aerial_p90_m']     = ws.apply(lambda r: p90(r['Aerial duels'],r['Minutes played']), axis=1)
+ws['int_p90_m']        = ws.apply(lambda r: p90(r['Interceptions'],r['Minutes played']), axis=1)
+ws['rec_p90_m']        = ws.apply(lambda r: p90(r['Recoveries'],r['Minutes played']), axis=1)
 ws_mins = ws['Minutes played']
 ws_opac = mins_to_opacity(ws_mins)
 
 st.caption("💡 Bar opacity = minutes played · Purple line = 5-match rolling average")
 
-ftab1,ftab2,ftab3 = st.tabs(["Duels","Attacking output","Losses & passing"])
+ftab1,ftab2,ftab3,ftab4 = st.tabs(["Duels","Attacking output","Defensive output","Losses & passing"])
 
 with ftab1:
     fig_d=go.Figure()
@@ -1000,6 +1004,34 @@ with ftab2:
     st.plotly_chart(fig_a,use_container_width=True)
 
 with ftab3:
+    fig_def = make_subplots(specs=[[{"secondary_y": True}]])
+    avg_def  = ws['def_duels_p90_m'].mean()
+    avg_aer  = ws['aerial_p90_m'].mean()
+    fig_def.add_bar(x=ws['match_label'], y=ws['def_duels_p90_m'], name='Def duels p90',
+        marker_color=colour_list(BLUE, ws_opac),
+        customdata=ws_mins, hovertemplate='%{x}<br>Def duels p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>',
+        secondary_y=False)
+    fig_def.add_bar(x=ws['match_label'], y=ws['aerial_p90_m'], name='Aerial duels p90',
+        marker_color=colour_list(GOLD, ws_opac),
+        customdata=ws_mins, hovertemplate='%{x}<br>Aerial p90: %{y:.1f} · %{customdata:.0f} mins<extra></extra>',
+        secondary_y=False)
+    fig_def.add_scatter(x=ws['match_label'], y=ws['int_p90_m'], mode='lines+markers', name='Interceptions p90',
+        line=dict(color=GREEN, width=2), marker=dict(size=5), connectgaps=True,
+        hovertemplate='%{x}<br>Int p90: %{y:.1f}<extra></extra>', secondary_y=True)
+    fig_def.add_scatter(x=ws['match_label'], y=rolling_avg(ws['def_duels_p90_m']), mode='lines',
+        name='Def duels rolling avg', line=dict(color=PURPLE, width=2), connectgaps=True,
+        hovertemplate='Rolling avg: %{y:.1f}<extra></extra>', secondary_y=False)
+    if 'def_duels_p90' in ws_peers:
+        pavg_dd = ws_peers['def_duels_p90'].mean()
+        fig_def.add_scatter(x=ws['match_label'], y=[pavg_dd]*len(ws), mode='lines',
+            name=f'Position def duels avg ({pavg_dd:.1f})', line=dict(color='#888', width=1.5, dash='dash'),
+            hoverinfo='skip', secondary_y=False)
+    fig_def.update_layout(**base_layout('Defensive output per 90', height=340), barmode='group')
+    fig_def.update_yaxes(secondary_y=True, title_text='Interceptions p90', showgrid=False,
+        title_font=dict(size=10, color='#555'))
+    st.plotly_chart(fig_def, use_container_width=True)
+
+with ftab4:
     avg_loss=ws['losses_p90_m'].mean()
     def loss_col(v,o):
         if v>=18:   return rgba(RED,o)
