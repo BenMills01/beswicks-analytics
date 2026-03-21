@@ -1005,8 +1005,8 @@ with ftab2:
 
 with ftab3:
     fig_def = make_subplots(specs=[[{"secondary_y": True}]])
-    avg_def  = ws['def_duels_p90_m'].mean()
-    avg_aer  = ws['aerial_p90_m'].mean()
+    avg_def  = ws['def_duels_raw'].mean()
+    avg_aer  = ws['aerial_raw'].mean()
     fig_def.add_bar(x=ws['match_label'], y=ws['def_duels_raw'], name='Def duels',
         marker_color=colour_list(BLUE, ws_opac),
         customdata=ws_mins, hovertemplate='%{x}<br>Def duels: %{y:.0f} · %{customdata:.0f} mins<extra></extra>',
