@@ -942,8 +942,8 @@ if ph is not None and len(ph) > 0:
 # ── Form trends ───────────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Form trends · match by match (last 20 league games)</div>', unsafe_allow_html=True)
 
-# Limit to most recent 20 League One matches for clarity
-ws = ws[ws['Competition'].str.contains('League One', na=False)].sort_values('Date', ascending=True).tail(20).reset_index(drop=True)
+# Limit to most recent 20 league matches (League One or League Two) for clarity
+ws = ws[ws['Competition'].str.contains('League One|League Two', na=False)].sort_values('Date', ascending=True).tail(20).reset_index(drop=True)
 
 ws['match_label']      = ws.apply(lambda r: parse_wyscout_label(r['Match'], club or club_from_file), axis=1)
 ws['duel_win_pct']     = ws.apply(lambda r: pct(r.iloc[21],r['Duels']),          axis=1)
