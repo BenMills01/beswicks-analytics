@@ -90,10 +90,28 @@ PURPLE   = '#a78bfa'
 DATA_DIR        = "data"
 PLAYERS_DIR     = os.path.join(DATA_DIR, "players")
 PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
-WYSCOUT_L1_PT1  = os.path.join(DATA_DIR, "Lge_1_25_26_pt1.xlsx")
-WYSCOUT_L1_PT2  = os.path.join(DATA_DIR, "Lge_1_25_26_pt2.xlsx")
-WYSCOUT_L2_PT1  = os.path.join(DATA_DIR, "Lge_2_25_26_pt1.xlsx")
-WYSCOUT_L2_PT2  = os.path.join(DATA_DIR, "Lge_2_25_26_pt2.xlsx")
+WS_FILES = {
+    'League One': {
+        'all':              os.path.join(DATA_DIR, "League_One_min_874_mins.xlsx"),
+        'Central Defender': os.path.join(DATA_DIR, "League_One_Central_Defenders.xlsx"),
+        'Full Back':        os.path.join(DATA_DIR, "League_One_Full_Back_Wing_Back.xlsx"),
+        'Central Mid':      os.path.join(DATA_DIR, "League_One_Central_Midfielders.xlsx"),
+        'Att Mid':          os.path.join(DATA_DIR, "League_One_Attacking_Midfielders.xlsx"),
+        'Wide Mid':         os.path.join(DATA_DIR, "League_One_Wide_Midfielders.xlsx"),
+        'Center Forward':   os.path.join(DATA_DIR, "League_One_CF_s.xlsx"),
+        'Goalkeeper':       os.path.join(DATA_DIR, "League_One_GKs.xlsx"),
+    },
+    'League Two': {
+        'all':              os.path.join(DATA_DIR, "League_Two_min_874_mins.xlsx"),
+        'Central Defender': os.path.join(DATA_DIR, "League_Two_Central_Defenders.xlsx"),
+        'Full Back':        os.path.join(DATA_DIR, "League_Two_FB_WB.xlsx"),
+        'Central Mid':      os.path.join(DATA_DIR, "League_Two_Central_Midfielders.xlsx"),
+        'Att Mid':          os.path.join(DATA_DIR, "League_Two_Attacking_Midfielders.xlsx"),
+        'Wide Mid':         os.path.join(DATA_DIR, "League_Two_Wide_Midfielders.xlsx"),
+        'Center Forward':   os.path.join(DATA_DIR, "League_Two_CFs.xlsx"),
+        'Goalkeeper':       os.path.join(DATA_DIR, "League_Two_GKs.xlsx"),
+    },
+}
 MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
 OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
 CONF_THRESHOLD  = 0.85  # below this, matching file entry is ignored unless overridden
@@ -273,11 +291,42 @@ def load_physical_csv():
 
 @st.cache_data
 def load_wyscout_league():
+    """Load combined all-player league files for comparison search."""
     dfs = []
-    for p in [WYSCOUT_L1_PT1, WYSCOUT_L1_PT2, WYSCOUT_L2_PT1, WYSCOUT_L2_PT2]:
+    for league, files in WS_FILES.items():
+        p = files['all']
         if os.path.exists(p):
             df = pd.read_excel(p)
-            df['_league'] = 'League One' if 'Lge_1' in p else 'League Two'
+            df['_league'] = league
+            dfs.append(df)
+    return pd.concat(dfs, ignore_index=True) if dfs else None
+
+@st.cache_data
+def find_player_position_file(player_short_name):
+    """
+    Find which position-specific file a player appears in by name lookup.
+    Returns the file key (e.g. 'Central Defender') or None.
+    Checks League One first, then League Two.
+    """
+    for league in ['League One', 'League Two']:
+        for pos_key, path in WS_FILES[league].items():
+            if pos_key == 'all': continue
+            if not os.path.exists(path): continue
+            df = pd.read_excel(path)
+            if player_short_name in df['Player'].values:
+                return pos_key
+    return None
+
+@st.cache_data
+def load_wyscout_position_file(pos_key, league_filter):
+    """Load position-specific file(s) for the given position key and league filter."""
+    leagues = ['League One', 'League Two'] if league_filter == 'Both' else [league_filter]
+    dfs = []
+    for league in leagues:
+        p = WS_FILES.get(league, {}).get(pos_key)
+        if p and os.path.exists(p):
+            df = pd.read_excel(p)
+            df['_league'] = league
             dfs.append(df)
     return pd.concat(dfs, ignore_index=True) if dfs else None
 
@@ -358,22 +407,10 @@ def build_physical_peers(phys_csv, position_group, min_mins, league_filter):
     }
     return {k:v for k,v in out.items() if len(v)>=5}, len(agg)
 
-def build_wyscout_peers(league_df, player_short_name, min_mins, league_filter, pos_match):
-    if league_df is None: return {}, 0
-    df = league_df if league_filter == 'Both' else league_df[league_df['_league'] == league_filter].copy()
-    # Find player position — check filtered first, fall back to full
-    pr = df[df['Player'] == player_short_name]
-    if len(pr) == 0: pr = league_df[league_df['Player'] == player_short_name]
-    if len(pr) == 0: return {}, 0
-    player_pos = str(pr.iloc[0]['Position'])
-    pos_tags   = [p.strip() for p in player_pos.split(',')]
-    if pos_match == 'Exact match':
-        df = df[df['Position'] == player_pos]
-    else:
-        def shares(pos_str):
-            if pd.isna(pos_str): return False
-            return any(t in [x.strip() for x in str(pos_str).split(',')] for t in pos_tags)
-        df = df[df['Position'].apply(shares)]
+def build_wyscout_peers(pos_key, league_filter, min_mins):
+    """Build Wyscout peer series from position-specific file."""
+    df = load_wyscout_position_file(pos_key, league_filter)
+    if df is None: return {}, 0
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins]
     if len(df) < 5: return {}, 0
     def ser(col):
@@ -404,22 +441,10 @@ def build_wyscout_peers(league_df, player_short_name, min_mins, league_filter, p
     }
     return {k:v for k,v in out.items() if v is not None}, len(df)
 
-def get_named_ws_peers(league_df, player_short_name, min_mins, league_filter, pos_match):
-    """Return the full peer DataFrame with Player+Team names for ranking charts."""
-    if league_df is None: return None
-    df = league_df if league_filter == 'Both' else league_df[league_df['_league'] == league_filter].copy()
-    pr = df[df['Player'] == player_short_name]
-    if len(pr) == 0: pr = league_df[league_df['Player'] == player_short_name]
-    if len(pr) == 0: return None
-    player_pos = str(pr.iloc[0]['Position'])
-    pos_tags   = [p.strip() for p in player_pos.split(',')]
-    if pos_match == 'Exact match':
-        df = df[df['Position'] == player_pos]
-    else:
-        def shares(pos_str):
-            if pd.isna(pos_str): return False
-            return any(t in [x.strip() for x in str(pos_str).split(',')] for t in pos_tags)
-        df = df[df['Position'].apply(shares)]
+def get_named_ws_peers(pos_key, league_filter, min_mins):
+    """Return the full peer DataFrame with Player+Team names (uses position-specific file)."""
+    df = load_wyscout_position_file(pos_key, league_filter)
+    if df is None: return None
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins]
     return df.reset_index(drop=True) if len(df) >= 5 else None
 
@@ -545,10 +570,6 @@ with st.sidebar:
     st.markdown("### Peer group filters")
     min_mins_peer = st.slider("Min minutes", 450, 1800, 900, 90)
     peer_league   = st.radio("League", ["Both","League One","League Two"], horizontal=True)
-    pos_match     = st.radio(
-        "Position matching", ["Shared tags","Exact match"], horizontal=True,
-        help="Shared tags: any player sharing a position code (e.g. RCB also matches CB, LCB).\nExact match: only players with the identical position string.",
-    )
 
     st.markdown("---")
     st.markdown("### Override player details")
@@ -610,11 +631,16 @@ league  = player_league  or ""
 pos     = player_pos_ovr or (position_group or "")
 age_val = player_age
 
+# ── Resolve position file key from player name lookup ─────────────────────────
+# Uses the player's Wyscout short name to find which position-specific file
+# they appear in — more reliable than mapping from SkillCorner position_group
+ws_pos_key = find_player_position_file(short_name) if short_name else None
+
 # ── Peer groups ───────────────────────────────────────────────────────────────
 phys_peers, phys_peer_n = build_physical_peers(phys_csv, position_group, min_mins_peer, peer_league)
-ws_peers,   ws_peer_n   = build_wyscout_peers(league_df, short_name, min_mins_peer, peer_league, pos_match)
+ws_peers,   ws_peer_n   = build_wyscout_peers(ws_pos_key, peer_league, min_mins_peer) if ws_pos_key else ({}, 0)
 # Named peer dataframes for ranking charts
-ws_peers_named   = get_named_ws_peers(league_df, short_name, min_mins_peer, peer_league, pos_match)
+ws_peers_named   = get_named_ws_peers(ws_pos_key, peer_league, min_mins_peer) if ws_pos_key else None
 phys_peers_named = get_named_phys_peers(phys_csv, position_group, min_mins_peer, peer_league)
 
 def gp(key, value, inverse=False):
@@ -633,7 +659,7 @@ try:
 except Exception:
     date_start, date_end = "–","–"
 
-peer_desc = f"{peer_league} · {pos_match} · {min_mins_peer}+ mins"
+peer_desc = f"{peer_league} · {min_mins_peer}+ mins · position-specific file"
 
 # ── Profile card ──────────────────────────────────────────────────────────────
 st.markdown(f"""
