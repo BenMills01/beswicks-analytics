@@ -23,22 +23,22 @@ MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
 OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
 PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
 WYSCOUT_FILES  = [
-    os.path.join(DATA_DIR, "League_One_min_874_mins.xlsx"),
-    os.path.join(DATA_DIR, "League_One_Central_Defenders.xlsx"),
-    os.path.join(DATA_DIR, "League_One_Full_Back_Wing_Back.xlsx"),
-    os.path.join(DATA_DIR, "League_One_Central_Midfielders.xlsx"),
-    os.path.join(DATA_DIR, "League_One_Attacking_Midfielders.xlsx"),
-    os.path.join(DATA_DIR, "League_One_Wide_Midfielders.xlsx"),
-    os.path.join(DATA_DIR, "League_One_CF_s.xlsx"),
-    os.path.join(DATA_DIR, "League_One_GKs.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_min_874_mins.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_Central_Defenders.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_FB_WB.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_Central_Midfielders.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_Attacking_Midfielders.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_Wide_Midfielders.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_CFs.xlsx"),
-    os.path.join(DATA_DIR, "League_Two_GKs.xlsx"),
+    os.path.join(DATA_DIR, "League One min 874 mins.xlsx"),
+    os.path.join(DATA_DIR, "League One Central Defenders.xlsx"),
+    os.path.join(DATA_DIR, "League One Full Back:Wing Back.xlsx"),
+    os.path.join(DATA_DIR, "League One Central Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League One Attacking Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League One Wide Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League One CF's.xlsx"),
+    os.path.join(DATA_DIR, "League One GKs.xlsx"),
+    os.path.join(DATA_DIR, "League Two min 874 mins.xlsx"),
+    os.path.join(DATA_DIR, "League Two Central Defenders.xlsx"),
+    os.path.join(DATA_DIR, "League Two FB:WB.xlsx"),
+    os.path.join(DATA_DIR, "League Two Central Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League Two Attacking Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League Two Wide Midfielders.xlsx"),
+    os.path.join(DATA_DIR, "League Two CFs.xlsx"),
+    os.path.join(DATA_DIR, "League Two GKs.xlsx"),
 ]
 
 CONF_THRESHOLD = 0.85  # below this → flagged as low confidence
