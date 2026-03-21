@@ -531,25 +531,45 @@ def get_physical_totals(ph):
 
 def build_match_log(ws, team_name):
     rows = []
+    def safe_int(v):
+        try: return int(v) if pd.notna(v) else 0
+        except: return 0
+    def safe_round(v, d=2):
+        try: return round(float(v), d) if pd.notna(v) else 0.0
+        except: return 0.0
+    def sp(n, d):
+        try: return f"{int(round(float(n)/float(d)*100))}%" if pd.notna(n) and pd.notna(d) and float(d)>0 else "-"
+        except: return "-"
     for _, r in ws.iterrows():
-        mins = r['Minutes played']
-        sp   = lambda n,d: f"{int(round(n/d*100))}%" if d>0 else "-"
         rows.append({
-            'Match':  parse_wyscout_label(r['Match'], team_name),
-            'Date':   pd.to_datetime(r['Date']).strftime('%d %b') if pd.notna(r['Date']) else '',
-            'Pos':    str(r['Position']), 'Min': int(mins),
-            'G':int(r['Goals']),'A':int(r['Assists']),
-            'xG':round(r['xG'],2),'xA':round(r['xA'],2),
-            'ShAst':int(r['Shot assists']),'TouBox':int(r['Touches in penalty area']),
-            'Drb':int(r['Dribbles']),'Drb%':sp(r.iloc[19],r['Dribbles']),
-            'Pass':int(r['Passes']),'Pass%':sp(r.iloc[13],r['Passes']),
-            'Cross':int(r['Crosses']),'PTF3':int(r['Passes to final third']),
-            'Duels':int(r['Duels']),'Duel%':sp(r.iloc[21],r['Duels']),
-            'AerDuel':int(r['Aerial duels']),'Aer%':sp(r.iloc[23],r['Aerial duels']),
-            'DefDuel':int(r.iloc[31]),'DefD%':sp(r.iloc[32],r.iloc[31]),
-            'Int':int(r['Interceptions']),'Rec':int(r['Recoveries']),
-            'Clr':int(r['Clearances']),'Loss':int(r['Losses']),
-            'LossOH':int(r['own half']),'Foul':int(r['Fouls']),
+            'Match':   parse_wyscout_label(r['Match'], team_name),
+            'Date':    pd.to_datetime(r['Date']).strftime('%d %b') if pd.notna(r['Date']) else '',
+            'Pos':     str(r['Position']),
+            'Min':     safe_int(r['Minutes played']),
+            'G':       safe_int(r['Goals']),
+            'A':       safe_int(r['Assists']),
+            'xG':      safe_round(r['xG']),
+            'xA':      safe_round(r['xA']),
+            'ShAst':   safe_int(r['Shot assists']),
+            'TouBox':  safe_int(r['Touches in penalty area']),
+            'Drb':     safe_int(r['Dribbles']),
+            'Drb%':    sp(r.iloc[19], r['Dribbles']),
+            'Pass':    safe_int(r['Passes']),
+            'Pass%':   sp(r.iloc[13], r['Passes']),
+            'Cross':   safe_int(r['Crosses']),
+            'PTF3':    safe_int(r['Passes to final third']),
+            'Duels':   safe_int(r['Duels']),
+            'Duel%':   sp(r.iloc[21], r['Duels']),
+            'AerDuel': safe_int(r['Aerial duels']),
+            'Aer%':    sp(r.iloc[23], r['Aerial duels']),
+            'DefDuel': safe_int(r.iloc[31]),
+            'DefD%':   sp(r.iloc[32], r.iloc[31]),
+            'Int':     safe_int(r['Interceptions']),
+            'Rec':     safe_int(r['Recoveries']),
+            'Clr':     safe_int(r['Clearances']),
+            'Loss':    safe_int(r['Losses']),
+            'LossOH':  safe_int(r['own half']),
+            'Foul':    safe_int(r['Fouls']),
         })
     return pd.DataFrame(rows)
 
@@ -995,7 +1015,9 @@ with ftab3:
 
 # ── Match log ─────────────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Match log · full game-by-game</div>', unsafe_allow_html=True)
-match_log   = build_match_log(ws, club or club_from_file)
+# Use full processed Wyscout data (all competitions, all games) not the form-trend filtered slice
+ws_all = process_wyscout(ws_raw)
+match_log   = build_match_log(ws_all, club or club_from_file)
 search      = st.text_input("Filter by opponent or position", placeholder="e.g. Barnsley (A), RWB, Jan...")
 display_log = match_log[match_log.apply(lambda r: r.astype(str).str.contains(search,case=False).any(),axis=1)] if search else match_log
 st.dataframe(display_log,use_container_width=True,hide_index=True,height=520,
