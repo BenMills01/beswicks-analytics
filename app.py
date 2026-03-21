@@ -1043,12 +1043,17 @@ else:
                         chart_labels.append(clabel); client_pcts.append(cp_c); comp_pcts.append(cp_x)
 
                 if len(chart_labels)>=3:
-                    def pct_colours(pcts,alpha='ff'):
-                        return ['#4ade80'+alpha if v>=80 else '#86efac'+alpha if v>=55 else '#facc15'+alpha if v>=35 else '#f87171'+alpha for v in pcts]
+                    def pct_colours(pcts, opacity=1.0):
+                        def c(v):
+                            if v>=80:   return f'rgba(74,222,128,{opacity})'
+                            elif v>=55: return f'rgba(134,239,172,{opacity})'
+                            elif v>=35: return f'rgba(250,204,21,{opacity})'
+                            else:       return f'rgba(248,113,113,{opacity})'
+                        return [c(v) for v in pcts]
                     fig_cmp=go.Figure()
-                    fig_cmp.add_bar(name=name,x=chart_labels,y=client_pcts,marker_color=pct_colours(client_pcts),
+                    fig_cmp.add_bar(name=name,x=chart_labels,y=client_pcts,marker_color=pct_colours(client_pcts,1.0),
                         hovertemplate='%{x}<br>'+name+': %{y:.0f}th percentile<extra></extra>')
-                    fig_cmp.add_bar(name=comp_row['Player'],x=chart_labels,y=comp_pcts,marker_color=pct_colours(comp_pcts,'bb'),
+                    fig_cmp.add_bar(name=comp_row['Player'],x=chart_labels,y=comp_pcts,marker_color=pct_colours(comp_pcts,0.6),
                         hovertemplate='%{x}<br>'+comp_row['Player']+': %{y:.0f}th percentile<extra></extra>')
                     fig_cmp.add_scatter(x=chart_labels,y=[50]*len(chart_labels),mode='lines',
                         name='50th percentile',line=dict(color='#444',width=1.5,dash='dash'),hoverinfo='skip')
