@@ -567,7 +567,7 @@ phys_peers, phys_peer_n = build_physical_peers(phys_csv, position_group, min_min
 ws_peers,   ws_peer_n   = build_wyscout_peers(league_df, short_name, min_mins_peer, peer_league, pos_match)
 
 def gp(key, value, inverse=False):
-    series = ws_peers.get(key) or phys_peers.get(key)
+    series = ws_peers.get(key) if key in ws_peers else phys_peers.get(key)
     if series is None or value is None: return None
     return percentile_rank(value, series, inverse=inverse)
 
