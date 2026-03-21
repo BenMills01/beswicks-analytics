@@ -437,7 +437,7 @@ def build_wyscout_peers(pos_key, league_filter, min_mins):
         'def_duels_p90':     ser('Defensive duels per 90'),
         'def_duel_win':      ser('Defensive duels won, %'),
         'interceptions_p90': ser('Interceptions per 90'),
-        'recoveries_p90':    ser('Successful defensive actions per 90'),
+        'recoveries_p90':    ser('Successful defensive actions per 90'),  # Wyscout composite: won def duels + interceptions + recoveries
     }
     return {k:v for k,v in out.items() if v is not None}, len(df)
 
@@ -507,7 +507,7 @@ def get_season_totals(ws):
         'def_duels_p90':    p90(ws.iloc[:,31].sum(),mins),
         'def_duel_win':     pct(ws.iloc[:,32].sum(),ws.iloc[:,31].sum()),
         'interceptions_p90':p90(s['Interceptions'],mins),
-        'recoveries_p90':   p90(s['Recoveries'],mins),
+        'recoveries_p90':   p90(s['Recoveries'],mins),  # raw recoveries from master — see note below
         'rec_opp_p90':      p90(ws['opp. half'].sum(),mins),
         'clearances_p90':   p90(s['Clearances'],mins),
         'losses_p90':       p90(s['Losses'],mins),
@@ -635,6 +635,22 @@ age_val = player_age
 # Uses the player's Wyscout short name to find which position-specific file
 # they appear in — more reliable than mapping from SkillCorner position_group
 ws_pos_key = find_player_position_file(short_name) if short_name else None
+
+# ── Override season metrics with league file values where more accurate ────────
+# Some metrics (e.g. Successful defensive actions) are computed differently in the
+# league export vs the master file. Where a league file value exists, use it.
+if ws_pos_key and short_name:
+    pos_df = load_wyscout_position_file(ws_pos_key, peer_league)
+    if pos_df is not None:
+        player_row = pos_df[pos_df['Player'] == short_name]
+        if len(player_row) > 0:
+            r = player_row.iloc[0]
+            def _lf(col):
+                try: return float(r[col]) if col in pos_df.columns else None
+                except: return None
+            # Override recoveries_p90 with league file 'Successful defensive actions per 90'
+            if _lf('Successful defensive actions per 90') is not None:
+                season['recoveries_p90'] = _lf('Successful defensive actions per 90')
 
 # ── Peer groups ───────────────────────────────────────────────────────────────
 phys_peers, phys_peer_n = build_physical_peers(phys_csv, position_group, min_mins_peer, peer_league)
