@@ -1057,13 +1057,18 @@ else:
                         hovertemplate='%{x}<br>'+comp_row['Player']+': %{y:.0f}th percentile<extra></extra>')
                     fig_cmp.add_scatter(x=chart_labels,y=[50]*len(chart_labels),mode='lines',
                         name='50th percentile',line=dict(color='#444',width=1.5,dash='dash'),hoverinfo='skip')
-                    fig_cmp.update_layout(**base_layout('',height=400),barmode='group',
+                    fig_cmp.update_layout(
+                        height=400, plot_bgcolor=PLOT_BG, paper_bgcolor=PAPER_BG,
+                        barmode='group',
+                        font=dict(color=TEXT_COL, size=11),
                         yaxis=dict(range=[0,105],tickvals=[0,25,50,75,100],
                             ticktext=['0','25th','50th','75th','100th'],
                             gridcolor=GRID_COL,showgrid=True,tickfont=dict(size=10,color='#666'),zeroline=False),
-                        xaxis=dict(tickangle=-30,tickfont=dict(size=10,color='#888'),showgrid=False),
+                        xaxis=dict(tickangle=-30,tickfont=dict(size=10,color='#888'),showgrid=False,gridcolor=GRID_COL),
                         legend=dict(bgcolor='rgba(0,0,0,0)',font=dict(size=11,color='#aaa'),orientation='h',y=1.06),
-                        margin=dict(l=10,r=10,t=20,b=80))
+                        margin=dict(l=10,r=10,t=20,b=80),
+                        hovermode='x unified',hoverlabel=dict(bgcolor='#1a1a1a',font_size=11),
+                    )
                     st.plotly_chart(fig_cmp,use_container_width=True)
                     st.markdown("""<div style='display:flex;gap:16px;justify-content:center;margin-top:4px;flex-wrap:wrap'>
                       <span style='font-size:0.7rem;color:#4ade80'>■ 80th+ percentile</span>
@@ -1072,6 +1077,153 @@ else:
                       <span style='font-size:0.7rem;color:#f87171'>■ Below 35th</span>
                       <span style='font-size:0.7rem;color:#555'>--- 50th percentile</span>
                     </div>""",unsafe_allow_html=True)
+
+
+# ── League ranking charts ─────────────────────────────────────────────────────
+st.markdown('<div class="section-header">League rankings · vs position peer group</div>', unsafe_allow_html=True)
+
+def build_ranking_chart(metric_label, peer_series, player_value, player_name, higher_is_better=True, fmt='.2f'):
+    """
+    Horizontal bar chart showing all peers ranked, client player highlighted in gold.
+    Returns a Plotly figure.
+    """
+    if peer_series is None or player_value is None:
+        return None
+
+    # Build dataframe of all peers + the player
+    peer_vals = peer_series.dropna().reset_index(drop=True)
+    if len(peer_vals) < 3:
+        return None
+
+    # Create combined df — add player if not already in series
+    df_rank = pd.DataFrame({'value': peer_vals, 'label': 'peer'})
+
+    # Sort: highest first for normal metrics, lowest first for inverse
+    df_rank = df_rank.sort_values('value', ascending=higher_is_better).reset_index(drop=True)
+
+    # Find where player sits (nearest value match)
+    player_rank_idx = (df_rank['value'] - player_value).abs().idxmin()
+    total = len(df_rank)
+    rank_num = total - player_rank_idx if higher_is_better else player_rank_idx + 1
+
+    # Colours: gold for player, grey for peers, colour-coded by percentile band
+    pct_val = percentile_rank(player_value, peer_series, inverse=not higher_is_better)
+
+    bar_colours = []
+    for i, row in df_rank.iterrows():
+        if abs(row['value'] - player_value) < 0.001:
+            bar_colours.append(GOLD)
+        else:
+            pv = percentile_rank(row['value'], peer_series, inverse=not higher_is_better)
+            bar_colours.append('#2a2a2a')
+
+    fig = go.Figure()
+    fig.add_bar(
+        x=df_rank['value'],
+        y=list(range(len(df_rank))),
+        orientation='h',
+        marker_color=bar_colours,
+        hovertemplate=f'%{{x:{fmt}}}<extra></extra>',
+        showlegend=False,
+    )
+    # Player value line
+    fig.add_vline(
+        x=player_value,
+        line=dict(color=GOLD, width=2, dash='dot'),
+    )
+
+    # Rank annotation
+    rank_label = f"{ordinal(int(pct_val))} pct" if pct_val else ""
+    fig.add_annotation(
+        x=player_value, y=len(df_rank),
+        text=f"<b>{player_value:{fmt}}</b>  {rank_label}",
+        showarrow=False,
+        font=dict(color=GOLD, size=10),
+        xanchor='left', yanchor='bottom',
+        xshift=5,
+    )
+
+    fig.update_layout(
+        title=dict(text=metric_label, font=dict(color=TEXT_COL, size=11, family='Inter'), x=0),
+        height=max(160, min(len(df_rank) * 6 + 60, 320)),
+        plot_bgcolor=PLOT_BG, paper_bgcolor=PLOT_BG,
+        margin=dict(l=4, r=12, t=28, b=20),
+        xaxis=dict(gridcolor=GRID_COL, showgrid=True, tickfont=dict(size=8, color='#555'), zeroline=False),
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+        hoverlabel=dict(bgcolor='#1a1a1a', font_size=10),
+    )
+    return fig
+
+# ── Define which metrics to rank ──────────────────────────────────────────────
+RANKING_METRICS = []
+
+# Wyscout metrics
+if ws_peer_n >= 5:
+    WS_RANK_METRICS = [
+        ('Goals p90',        'goals_p90',        True,  '.2f'),
+        ('xG p90',           'xg_p90',           True,  '.2f'),
+        ('Assists p90',      'assists_p90',       True,  '.2f'),
+        ('xA p90',           'xa_p90',            True,  '.2f'),
+        ('Shot asts p90',    'shot_asts_p90',     True,  '.2f'),
+        ('Touches box p90',  'touches_box_p90',   True,  '.2f'),
+        ('Prog runs p90',    'prog_runs_p90',     True,  '.2f'),
+        ('Dribbles p90',     'dribbles_p90',      True,  '.2f'),
+        ('Passes p90',       'passes_p90',        True,  '.1f'),
+        ('Pass acc %',       'pass_acc',          True,  '.1f'),
+        ('Crosses p90',      'crosses_p90',       True,  '.2f'),
+        ('Duels p90',        'duels_p90',         True,  '.1f'),
+        ('Duel win %',       'duel_win',          True,  '.1f'),
+        ('Aerial p90',       'aerial_p90',        True,  '.2f'),
+        ('Aerial win %',     'aerial_win',        True,  '.1f'),
+        ('Def duels p90',    'def_duels_p90',     True,  '.2f'),
+        ('Def duel win %',   'def_duel_win',      True,  '.1f'),
+        ('Interceptions p90','interceptions_p90', True,  '.2f'),
+        ('Recoveries p90',   'recoveries_p90',    True,  '.2f'),
+        ('Losses p90',       'losses_p90',        False, '.2f'),
+    ]
+    for label, key, higher, fmt in WS_RANK_METRICS:
+        if key in ws_peers and season.get(key) is not None:
+            RANKING_METRICS.append((label, ws_peers[key], season[key], higher, fmt, 'ws'))
+
+# Physical metrics
+if phys_peer_n >= 5 and phys is not None:
+    PHYS_RANK_METRICS = [
+        ('Total dist p90',   'total_dist_p90',   True,  ',.0f'),
+        ('HSR dist p90',     'hsr_dist_p90',     True,  '.0f'),
+        ('Sprint dist p90',  'sprint_dist_p90',  True,  '.0f'),
+        ('PSV99 avg',        'psv99_avg',         True,  '.2f'),
+        ('High accel p90',   'hi_accel_p90',     True,  '.1f'),
+    ]
+    for label, key, higher, fmt in PHYS_RANK_METRICS:
+        if key in phys_peers and phys.get(key) is not None:
+            RANKING_METRICS.append((label, phys_peers[key], phys[key], higher, fmt, 'phys'))
+
+if not RANKING_METRICS:
+    st.markdown('<div class="peer-banner peer-banner-warn">⚠ No peer data available for ranking charts — check peer group filters</div>', unsafe_allow_html=True)
+else:
+    # Show toggle for metric group
+    rank_group = st.radio("Show", ["All", "Wyscout", "Physical"], horizontal=True, key="rank_group")
+
+    filtered_metrics = [m for m in RANKING_METRICS if
+        rank_group == "All" or
+        (rank_group == "Wyscout"  and m[5] == 'ws') or
+        (rank_group == "Physical" and m[5] == 'phys')
+    ]
+
+    st.caption(f"Showing {len(filtered_metrics)} metrics · {ws_peer_n} position peers · gold bar = {name} · bars sorted by value")
+    st.markdown("")
+
+    # Render in 3-column grid
+    cols_per_row = 3
+    for row_start in range(0, len(filtered_metrics), cols_per_row):
+        row_metrics = filtered_metrics[row_start:row_start + cols_per_row]
+        cols = st.columns(cols_per_row)
+        for col_idx, (label, series, player_val, higher, fmt, _) in enumerate(row_metrics):
+            fig = build_ranking_chart(label, series, player_val, name, higher, fmt)
+            if fig:
+                with cols[col_idx]:
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
