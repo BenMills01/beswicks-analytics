@@ -302,6 +302,32 @@ def load_wyscout_league():
     return pd.concat(dfs, ignore_index=True) if dfs else None
 
 @st.cache_data
+def build_physical_season_averages(phys_csv):
+    """Aggregate physical CSV into per-player season averages for comparison."""
+    if phys_csv is None: return None
+    df = phys_csv[phys_csv['quality_check'] == True].copy()
+    agg = df.groupby(['player_name', 'team_name', 'competition_name']).agg(
+        mins         = ('minutes_played_per_match', 'sum'),
+        total_dist   = ('dist_per_match',            'sum'),
+        hsr_dist     = ('hsr_dist_per_match',         'sum'),
+        sprint_dist  = ('sprint_dist_per_match',      'sum'),
+        hsr_count    = ('count_hsr_per_match',         'sum'),
+        sprint_count = ('count_sprint_per_match',      'sum'),
+        hi_accel     = ('count_high_accel_per_match',  'sum'),
+        psv99        = ('top_speed_per_match',         'mean'),
+    ).reset_index()
+    agg = agg[agg['mins'] >= 450].copy()
+    agg['total_dist_p90']  = agg['total_dist']  / agg['mins'] * 90
+    agg['hsr_dist_p90']    = agg['hsr_dist']    / agg['mins'] * 90
+    agg['sprint_dist_p90'] = agg['sprint_dist'] / agg['mins'] * 90
+    agg['hsr_count_p90']   = agg['hsr_count']   / agg['mins'] * 90
+    agg['sprint_count_p90']= agg['sprint_count']/ agg['mins'] * 90
+    agg['hi_accel_p90']    = agg['hi_accel']    / agg['mins'] * 90
+    agg['psv99_avg']       = agg['psv99']
+    return agg
+
+
+@st.cache_data
 def find_player_position_file(player_short_name):
     """
     Find which position-specific file a player appears in by name lookup.
@@ -619,6 +645,7 @@ with st.spinner(f"Loading {selected_name}..."):
     league_df    = load_wyscout_league()
     matching_df  = load_matching()
     overrides_df = load_overrides()
+    phys_avgs    = build_physical_season_averages(phys_csv)
 
 ws_raw = sheets.get('Wyscout')
 ph_raw = sheets.get('Physical')
@@ -1114,6 +1141,29 @@ else:
                 'def_duel_win':      cv('Defensive duels won, %'),
             }
 
+            # Look up physical stats for comparison player by name
+            comp_phys = {}
+            if phys_avgs is not None:
+                comp_name = comp_row.get('Player','')
+                # Try exact match first, then partial
+                phys_match = phys_avgs[phys_avgs['player_name'] == comp_name]
+                if len(phys_match) == 0:
+                    # Try matching by last name token
+                    parts = str(comp_name).split('.')
+                    if len(parts) > 1:
+                        surname = parts[-1].strip()
+                        phys_match = phys_avgs[phys_avgs['player_name'].str.contains(surname, case=False, na=False)]
+                if len(phys_match) > 0:
+                    pr = phys_match.iloc[0]
+                    comp_phys = {
+                        'total_dist_p90':  round(float(pr['total_dist_p90']),  1),
+                        'hsr_dist_p90':    round(float(pr['hsr_dist_p90']),    1),
+                        'sprint_dist_p90': round(float(pr['sprint_dist_p90']), 1),
+                        'psv99_avg':       round(float(pr['psv99_avg']),        2),
+                        'hi_accel_p90':    round(float(pr['hi_accel_p90']),    1),
+                    }
+                    comp.update(comp_phys)
+
             comp_mins_str = f"{int(comp_row.get('Minutes played'))} mins" if pd.notna(comp_row.get('Minutes played')) else ""
 
             ca,cvs,cb = st.columns([5,1,5])
@@ -1125,6 +1175,8 @@ else:
                 st.markdown(f"<div style='background:#0f0f0f;border-radius:8px;padding:14px 18px;border-left:4px solid #3b82f6;margin:8px 0'><div style='font-size:1.1rem;font-weight:700;color:#fff'>{comp_row['Player']}</div><div style='font-size:0.75rem;color:#888'>{comp_row.get('Team','')} · {comp_row.get('Position','')} · {comp_mins_str}</div></div>",unsafe_allow_html=True)
 
             COMP_METRICS = [
+                ("Total dist p90",'total_dist_p90',False),("HSR dist p90",'hsr_dist_p90',False),
+                ("Sprint dist p90",'sprint_dist_p90',False),("PSV99 avg",'psv99_avg',False),
                 ("Goals p90",'goals_p90',False),("Assists p90",'assists_p90',False),
                 ("xG p90",'xg_p90',False),("xA p90",'xa_p90',False),
                 ("Shot asts p90",'shot_asts_p90',False),("Touches box p90",'touches_box_p90',False),
