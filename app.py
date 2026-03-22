@@ -626,6 +626,18 @@ with st.sidebar:
     player_age     = st.number_input("Age", min_value=15, max_value=45, value=24)
 
     st.markdown("---")
+    st.markdown("### Position file override")
+    st.caption("Auto-detected from player name. Override if the wrong file is selected.")
+    _pos_file_options = ["Auto-detect"] + list(WS_FILES.get("League One", {}).keys())
+    _pos_file_options_display = [o for o in _pos_file_options if o != "all"]
+    pos_file_override = st.selectbox(
+        "Position file",
+        _pos_file_options_display,
+        index=0,
+        help="Select the correct position group file if auto-detection is wrong."
+    )
+
+    st.markdown("---")
     st.markdown("### Export")
     export_btn = st.button("📄 Generate PDF report", use_container_width=True, help="Exports player profile, metrics, radar chart and match log as a branded PDF.")
     st.caption("Beswicks Sports Analytics · Internal Use Only")
@@ -682,6 +694,9 @@ age_val = player_age
 # Uses the player's Wyscout short name to find which position-specific file
 # they appear in — more reliable than mapping from SkillCorner position_group
 ws_pos_key = find_player_position_file(short_name) if short_name else None
+# Apply manual position file override from sidebar
+if pos_file_override and pos_file_override != "Auto-detect":
+    ws_pos_key = pos_file_override
 
 # ── Override season metrics with league file values where more accurate ────────
 # Always look up the player's OWN league (not the peer filter) so the stat
