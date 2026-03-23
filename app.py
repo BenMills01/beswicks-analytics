@@ -247,6 +247,17 @@ def load_overrides():
         return pd.DataFrame(columns=['sc_player_id','skillcorner_name','wyscout_name','wyscout_team','notes','updated_at'])
     return pd.read_csv(OVERRIDES_CSV)
 
+# ── Startup validation ────────────────────────────────────────────────────────
+from src.validate import run_startup_validation, display_validation_results
+
+@st.cache_data
+def get_validation_results():
+    return run_startup_validation(PLAYERS_DIR, WS_FILES, MATCHING_CSV, OVERRIDES_CSV)
+
+validation = get_validation_results()
+if not validation["all_valid"]:
+    display_validation_results(validation)
+
 def resolve_wyscout_name(sc_player_id, fallback_short_name, matching_df, overrides_df):
     """
     Return the correct Wyscout abbreviated name for a SkillCorner player.
