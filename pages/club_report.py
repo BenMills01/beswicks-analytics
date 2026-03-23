@@ -134,6 +134,102 @@ def _fmt(v, d=2, fallback='–'):
     return f"{v:.{d}f}"
 
 
+def _build_data_summary(
+    name, club, pos, age, matches, mins, goals, assists,
+    season, phys, ws_peers, phys_peers, ws_peer_n, phys_peer_n,
+    target_club, target_league, club_need, extra_notes,
+    club_profile_context: str = "",
+) -> str:
+    """
+    Build a structured plain-text data summary without AI prose.
+    Suitable for analysts who want the numbers without a generated narrative.
+    """
+
+    def pr(key, val, inverse=False, peers=None):
+        p = peers or ws_peers
+        if key not in p or val is None:
+            return ""
+        r = percentile_rank(val, p[key], inverse=inverse)
+        return f"  ({int(r)}th pct)" if r is not None else ""
+
+    lines = [
+        f"CLUB REPORT — DATA SUMMARY",
+        f"{'=' * 52}",
+        f"Player:    {name}",
+        f"Position:  {pos}",
+        f"Club:      {club}",
+        f"Target:    {target_club}" + (f"  ({target_league})" if target_league else ""),
+        f"Sample:    {matches} apps · {mins:,} mins · {goals}G · {assists}A",
+        f"Peers:     {ws_peer_n} Wyscout · {phys_peer_n} physical",
+        "",
+    ]
+
+    if club_profile_context:
+        lines += [
+            "CLUB PROFILE (Wyscout data)",
+            f"  {club_profile_context}",
+            "",
+        ]
+
+    if club_need.strip():
+        lines += [f"What they need: {club_need.strip()}", ""]
+    if extra_notes.strip():
+        lines += [f"Context: {extra_notes.strip()}", ""]
+
+    lines += [
+        "ATTACKING",
+        f"  Goals p90:         {season.get('goals_p90', 0):.2f}{pr('goals_p90', season.get('goals_p90'))}",
+        f"  xG p90:            {season.get('xg_p90', 0):.2f}{pr('xg_p90', season.get('xg_p90'))}",
+        f"  Assists p90:       {season.get('assists_p90', 0):.2f}{pr('assists_p90', season.get('assists_p90'))}",
+        f"  xA p90:            {season.get('xa_p90', 0):.2f}{pr('xa_p90', season.get('xa_p90'))}",
+        f"  Shot assists p90:  {season.get('shot_asts_p90', 0):.2f}{pr('shot_asts_p90', season.get('shot_asts_p90'))}",
+        f"  Dribbles p90:      {season.get('dribbles_p90', 0):.2f}{pr('dribbles_p90', season.get('dribbles_p90'))}",
+        f"  Prog runs p90:     {season.get('prog_runs_p90', 0):.2f}{pr('prog_runs_p90', season.get('prog_runs_p90'))}",
+        "",
+        "PASSING",
+        f"  Passes p90:        {season.get('passes_p90', 0):.1f}{pr('passes_p90', season.get('passes_p90'))}",
+        f"  Pass accuracy:     {season.get('pass_acc', 0):.1f}%{pr('pass_acc', season.get('pass_acc'))}",
+        f"  Long passes p90:   {season.get('long_passes_p90', 0):.2f}{pr('long_passes_p90', season.get('long_passes_p90'))}",
+        f"  Crosses p90:       {season.get('crosses_p90', 0):.2f}{pr('crosses_p90', season.get('crosses_p90'))}",
+        "",
+        "DUELS & DEFENDING",
+        f"  Duels p90:         {season.get('duels_p90', 0):.1f}{pr('duels_p90', season.get('duels_p90'))}",
+        f"  Duel win %:        {season.get('duel_win', 0):.1f}%{pr('duel_win', season.get('duel_win'))}",
+        f"  Aerial p90:        {season.get('aerial_p90', 0):.2f}{pr('aerial_p90', season.get('aerial_p90'))}",
+        f"  Aerial win %:      {season.get('aerial_win', 0):.1f}%{pr('aerial_win', season.get('aerial_win'))}",
+        f"  Def duels p90:     {season.get('def_duels_p90', 0):.2f}{pr('def_duels_p90', season.get('def_duels_p90'))}",
+        f"  Def duel win %:    {season.get('def_duel_win', 0):.1f}%{pr('def_duel_win', season.get('def_duel_win'))}",
+        f"  Interceptions p90: {season.get('interceptions_p90', 0):.2f}{pr('interceptions_p90', season.get('interceptions_p90'))}",
+        f"  Recoveries p90:    {season.get('recoveries_p90', 0):.2f}{pr('recoveries_p90', season.get('recoveries_p90'))}",
+        f"  Ball losses p90:   {season.get('losses_p90', 0):.2f}{pr('losses_p90', season.get('losses_p90'), inverse=True)}",
+        "",
+    ]
+
+    if phys and phys_peer_n >= MIN_PEER_N:
+        lines += [
+            f"PHYSICAL  (vs {phys_peer_n} position peers)",
+            f"  Total dist p90:    {phys.get('total_dist_p90', 0):.1f} m{pr('total_dist_p90', phys.get('total_dist_p90'), peers=phys_peers)}",
+            f"  HSR dist p90:      {phys.get('hsr_dist_p90', 0):.1f} m{pr('hsr_dist_p90', phys.get('hsr_dist_p90'), peers=phys_peers)}",
+            f"  Sprint dist p90:   {phys.get('sprint_dist_p90', 0):.1f} m{pr('sprint_dist_p90', phys.get('sprint_dist_p90'), peers=phys_peers)}",
+            f"  PSV99 avg:         {phys.get('psv99_avg', 0):.1f}{pr('psv99_avg', phys.get('psv99_avg'), peers=phys_peers)}",
+            f"  Hi-accel p90:      {phys.get('hi_accel_p90', 0):.2f}{pr('hi_accel_p90', phys.get('hi_accel_p90'), peers=phys_peers)}",
+            "",
+        ]
+    elif phys:
+        lines += [
+            "PHYSICAL  (insufficient peers for percentile ranking)",
+            f"  Total dist p90:    {phys.get('total_dist_p90', 0):.1f} m",
+            f"  HSR dist p90:      {phys.get('hsr_dist_p90', 0):.1f} m",
+            f"  Sprint dist p90:   {phys.get('sprint_dist_p90', 0):.1f} m",
+            f"  PSV99 avg:         {phys.get('psv99_avg', 0):.1f}",
+            "",
+        ]
+
+    lines.append("Generated by Beswicks Sports Analytics")
+
+    return "\n".join(lines)
+
+
 def _build_prompt(
     name, club, pos, age, matches, mins, goals, assists,
     season, phys, ws_peers, phys_peers, ws_peer_n, phys_peer_n,
@@ -353,45 +449,67 @@ if available_clubs:
     else:
         st.caption(f"No file match for '{target_club}' in {_n_clubs} available clubs — using manual context only.")
 
-# ── Generate narrative ────────────────────────────────────────────────────────
+# ── Report mode toggle ────────────────────────────────────────────────────────
+st.markdown('<div class="section-header">Report mode</div>', unsafe_allow_html=True)
+report_mode = st.radio(
+    "report_mode",
+    ["AI narrative", "Data only"],
+    horizontal=True,
+    label_visibility="collapsed",
+    help="AI narrative calls Claude to write a transfer pitch. Data only formats the raw stats and club profile without AI.",
+)
+
+# ── Generate ──────────────────────────────────────────────────────────────────
 if "narrative" not in st.session_state:
     st.session_state.narrative = None
 if "narrative_player" not in st.session_state:
     st.session_state.narrative_player = None
 if "narrative_club" not in st.session_state:
     st.session_state.narrative_club = None
+if "narrative_mode" not in st.session_state:
+    st.session_state.narrative_mode = None
 
+_shared_args = dict(
+    name=selected_name, club=club, pos=pos, age=24,
+    matches=int(season.get('matches', 0)),
+    mins=int(season.get('mins', 0)),
+    goals=int(season.get('goals_raw', 0)),
+    assists=int(season.get('assists_raw', 0)),
+    season=season_combined, phys=phys,
+    ws_peers=ws_peers, phys_peers=phys_peers,
+    ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
+    target_club=target_club, target_league=target_league,
+    club_need=club_need, extra_notes=extra_notes,
+    club_profile_context=_club_profile_context,
+)
+
+_stale = (
+    st.session_state.narrative is None or
+    st.session_state.narrative_player != selected_name or
+    st.session_state.narrative_club   != target_club or
+    st.session_state.narrative_mode   != report_mode
+)
+
+_btn_label = "✨ Generate AI report" if report_mode == "AI narrative" else "📊 Generate data summary"
 col_gen, col_regen = st.columns([3, 1])
 with col_gen:
-    generate_btn = st.button("✨ Generate report", use_container_width=True, type="primary")
+    generate_btn = st.button(_btn_label, use_container_width=True, type="primary")
 with col_regen:
-    regen_btn = st.button("↺ Regenerate", use_container_width=True,
-                          disabled=(st.session_state.narrative is None or
-                                    st.session_state.narrative_player != selected_name or
-                                    st.session_state.narrative_club   != target_club))
+    regen_btn = st.button("↺ Regenerate", use_container_width=True, disabled=_stale)
 
 if generate_btn or regen_btn:
-    if not club_need.strip():
-        st.warning("Please describe what the club needs before generating.")
+    if report_mode == "AI narrative" and not club_need.strip():
+        st.warning("Please describe what the club needs before generating an AI narrative.")
+    elif report_mode == "Data only":
+        # Instant — no API call needed
+        st.session_state.narrative        = _build_data_summary(**_shared_args)
+        st.session_state.narrative_player = selected_name
+        st.session_state.narrative_club   = target_club
+        st.session_state.narrative_mode   = report_mode
     else:
         with st.spinner("Generating transfer pitch narrative..."):
             try:
-                prompt = _build_prompt(
-                    name=selected_name, club=club, pos=pos, age=24,
-                    matches=int(season.get('matches', 0)),
-                    mins=int(season.get('mins', 0)),
-                    goals=int(season.get('goals_raw', 0)),
-                    assists=int(season.get('assists_raw', 0)),
-                    season=season_combined,
-                    phys=phys,
-                    ws_peers=ws_peers, phys_peers=phys_peers,
-                    ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
-                    target_club=target_club,
-                    target_league=target_league,
-                    club_need=club_need,
-                    extra_notes=extra_notes,
-                    club_profile_context=_club_profile_context,
-                )
+                prompt = _build_prompt(**_shared_args)
                 client = anthropic.Anthropic()
                 msg    = client.messages.create(
                     model='claude-opus-4-6',
@@ -401,22 +519,29 @@ if generate_btn or regen_btn:
                 st.session_state.narrative        = msg.content[0].text
                 st.session_state.narrative_player = selected_name
                 st.session_state.narrative_club   = target_club
+                st.session_state.narrative_mode   = report_mode
             except anthropic.APIConnectionError:
                 st.error("Could not connect to the Anthropic API. Check your ANTHROPIC_API_KEY environment variable.")
             except Exception as e:
                 st.error(f"Narrative generation failed: {e}")
                 st.exception(e)
 
-# ── Narrative preview ─────────────────────────────────────────────────────────
+# ── Preview ───────────────────────────────────────────────────────────────────
 if (st.session_state.narrative and
         st.session_state.narrative_player == selected_name and
         st.session_state.narrative_club   == target_club):
 
-    st.markdown('<div class="section-header">Transfer pitch narrative</div>', unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='narrative-box'>{st.session_state.narrative.replace(chr(10), '<br><br>')}</div>",
-        unsafe_allow_html=True,
-    )
+    _is_data_mode = st.session_state.narrative_mode == "Data only"
+    _section_label = "Data summary" if _is_data_mode else "Transfer pitch narrative"
+    st.markdown(f'<div class="section-header">{_section_label}</div>', unsafe_allow_html=True)
+
+    if _is_data_mode:
+        st.code(st.session_state.narrative, language=None)
+    else:
+        st.markdown(
+            f"<div class='narrative-box'>{st.session_state.narrative.replace(chr(10), '<br><br>')}</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── PDF export ────────────────────────────────────────────────────────────
     st.markdown("---")
