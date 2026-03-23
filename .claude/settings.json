@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(streamlit:*)",
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

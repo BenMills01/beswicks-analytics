@@ -1,0 +1,28 @@
+# Beswicks Analytics — gitignore
+
+# Local Claude overrides (personal, not team)
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data — player files are committed but temp exports are not
+reports/
+*.pdf
+
+# IDE
+.vscode/
+.idea/
