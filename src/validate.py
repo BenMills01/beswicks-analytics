@@ -28,15 +28,18 @@ _WYSCOUT_REQUIRED_COLS = [
     'Passes to final third', 'Fouls', 'own half', 'opp. half',
 ]
 
-# iloc position → keyword that should appear (case-insensitive) in the column header
+# iloc position → keywords that should appear (case-insensitive) in the column header.
+# Wyscout exports use multi-level headers; pandas deduplicates repeated names as
+# 'won', 'won.1', 'successful.1' etc. — accepted keywords reflect both the full
+# column name and the deduplicated short form that actually appears in the header row.
 _ILOC_CHECKS: Dict[int, List[str]] = {
-    13: ['pass'],           # accurate passes
-    19: ['dribble'],        # successful dribbles
-    21: ['duel'],           # duels won
-    23: ['aerial'],         # aerial duels won
-    31: ['def'],            # defensive duels
-    39: ['yellow', 'card'], # yellow cards
-    40: ['red', 'card'],    # red cards
+    13: ['pass', 'accurate'],            # accurate passes
+    19: ['dribble', 'successful'],       # successful dribbles (may appear as 'successful.1')
+    21: ['duel', 'won'],                 # duels won (may appear as 'won')
+    23: ['aerial', 'won'],               # aerial duels won (may appear as 'won.1')
+    31: ['def', 'defensive', 'won'],     # defensive duels (may appear as 'won.2' or 'defensive')
+    39: ['yellow', 'card'],              # yellow cards
+    40: ['red', 'card'],                 # red cards
 }
 
 _PHYSICAL_REQUIRED_COLS = [
