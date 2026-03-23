@@ -240,11 +240,10 @@ def_dpct_m= pct(def_dw_m, def_d_m)
 # ── Wyscout column ────────────────────────────────────────────────────────────
 with col_ws:
     st.markdown('<div class="section-header">Wyscout stats</div>', unsafe_allow_html=True)
-    rows_html = ""
+    rows_html = []
 
     def add(label, match_str, season_str, match_val=None, season_val=None, inverse=False):
-        nonlocal rows_html
-        rows_html += stat_row_html(label, match_str, season_str, delta_html(match_val, season_val, inverse))
+        rows_html.append(stat_row_html(label, match_str, season_str, delta_html(match_val, season_val, inverse)))
 
     add('Goals',        fmt_int(gws('Goals')),              fmt_int(season.get('goals_raw')),
         gws('Goals'), season.get('goals_raw'))
@@ -294,7 +293,7 @@ with col_ws:
         mp90(gws('Losses')), season.get('losses_p90'), inverse=True)
 
     st.markdown(
-        f"<div style='background:#1a1a1a;border-radius:8px;overflow:hidden'>{rows_html}</div>",
+        f"<div style='background:#1a1a1a;border-radius:8px;overflow:hidden'>{''.join(rows_html)}</div>",
         unsafe_allow_html=True,
     )
 
@@ -323,11 +322,10 @@ with col_ph:
                 return None
             return round(raw / ph_mins * 90, 1)
 
-        ph_rows_html = ""
+        ph_rows_html = []
 
         def addp(label, match_str, season_str, match_val=None, season_val=None, inverse=False):
-            nonlocal ph_rows_html
-            ph_rows_html += stat_row_html(label, match_str, season_str, delta_html(match_val, season_val, inverse))
+            ph_rows_html.append(stat_row_html(label, match_str, season_str, delta_html(match_val, season_val, inverse)))
 
         addp('Total dist p90',
              f"{int(p90ph(raw_dist)):,}m" if p90ph(raw_dist) else '–',
@@ -359,7 +357,7 @@ with col_ph:
              p90ph(raw_accel), phys.get('hi_accel_p90') if phys else None)
 
         st.markdown(
-            f"<div style='background:#1a1a1a;border-radius:8px;overflow:hidden'>{ph_rows_html}</div>",
+            f"<div style='background:#1a1a1a;border-radius:8px;overflow:hidden'>{''.join(ph_rows_html)}</div>",
             unsafe_allow_html=True,
         )
 
