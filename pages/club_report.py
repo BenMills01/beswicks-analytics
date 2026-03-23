@@ -15,6 +15,9 @@ from datetime import datetime
 
 import anthropic
 
+from src.clubs import (
+    get_club_list, get_club_profile, fuzzy_match_club, format_club_context,
+)
 from src.metrics import (
     get_season_totals, get_physical_totals, build_match_log,
     build_physical_peers, build_wyscout_peers, build_physical_season_averages,
@@ -82,6 +85,11 @@ WS_FILES = {
 }
 
 
+@st.cache_data
+def _cached_club_list() -> dict[str, str]:
+    return get_club_list()
+
+
 def get_player_list():
     pattern = os.path.join(os.path.abspath(PLAYERS_DIR), "*_master.xlsx")
     files   = sorted(glob.glob(pattern))
@@ -130,6 +138,7 @@ def _build_prompt(
     name, club, pos, age, matches, mins, goals, assists,
     season, phys, ws_peers, phys_peers, ws_peer_n, phys_peer_n,
     target_club, target_league, club_need, extra_notes,
+    club_profile_context: str = "",
 ) -> str:
     """Build the Anthropic prompt for the transfer pitch narrative."""
 
@@ -189,8 +198,10 @@ def _build_prompt(
     lines += [
         f"\nTARGET CLUB: {target_club}",
         f"DIVISION: {target_league}",
-        f"WHAT THEY NEED: {club_need}",
     ]
+    if club_profile_context:
+        lines.append(f"CLUB PROFILE (Wyscout data): {club_profile_context}")
+    lines.append(f"WHAT THEY NEED: {club_need}")
     if extra_notes.strip():
         lines.append(f"ADDITIONAL CONTEXT: {extra_notes}")
 
@@ -284,9 +295,16 @@ else:
 # ── Club context inputs ────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Target club</div>', unsafe_allow_html=True)
 
+available_clubs = _cached_club_list()
+_n_clubs = len(available_clubs)
+
 col_a, col_b = st.columns(2)
 with col_a:
-    target_club   = st.text_input("Club name", placeholder="e.g. Bristol City")
+    target_club   = st.text_input(
+        "Club name",
+        placeholder="e.g. Bristol City",
+        help=f"{_n_clubs} club files available — start typing to auto-match" if _n_clubs else "No club files found in data/clubs/",
+    )
     target_league = st.text_input("League / division", placeholder="e.g. Championship")
 with col_b:
     club_need     = st.text_area("What the club needs", height=76,
@@ -297,6 +315,43 @@ with col_b:
 if not target_club:
     st.info("Enter the target club name to generate a report.")
     st.stop()
+
+# ── Auto-match club file ───────────────────────────────────────────────────────
+_club_profile: dict = {}
+_club_profile_context: str = ""
+
+if available_clubs:
+    _match = fuzzy_match_club(target_club, available_clubs)
+    if _match:
+        _matched_name, _matched_path = _match
+        try:
+            _club_profile = get_club_profile(_matched_name, _matched_path)
+            _club_profile_context = format_club_context(_club_profile)
+        except Exception as _e:
+            st.warning(f"Could not load club file for {_matched_name}: {_e}")
+
+        if _club_profile.get("matches", 0) > 0:
+            _p = _club_profile
+            _wdl = f"W{_p.get('wins',0)}/D{_p.get('draws',0)}/L{_p.get('losses',0)}"
+            st.markdown(
+                f"""<div style="background:#161616;border:1px solid #2a2a2a;border-left:4px solid {GOLD};
+                border-radius:0 8px 8px 0;padding:14px 18px;margin:8px 0 16px;font-size:0.82rem;color:#ccc;">
+                <span style="color:{GOLD};font-weight:700;text-transform:uppercase;
+                letter-spacing:0.08em;font-size:0.7rem;">Club profile matched — {_matched_name}</span><br>
+                <span style="color:#999;margin-top:6px;display:block;">
+                {"Formation: <b style='color:#e0e0e0'>" + str(_p.get("primary_formation","")) + "</b> &nbsp;·&nbsp;" if _p.get("primary_formation","Unknown") != "Unknown" else ""}
+                {"<b style='color:#e0e0e0'>" + str(_p.get("press_intensity","")) + "</b> &nbsp;·&nbsp;" if _p.get("press_intensity") else ""}
+                {"<b style='color:#e0e0e0'>" + str(_p.get("play_style","")) + "</b> &nbsp;·&nbsp;" if _p.get("play_style") else ""}
+                {"PPDA <b style='color:#e0e0e0'>" + f"{_p['avg_ppda']:.1f}" + "</b> &nbsp;·&nbsp;" if _p.get("avg_ppda") else ""}
+                {"Possession <b style='color:#e0e0e0'>" + f"{_p['avg_possession']:.0f}%" + "</b> &nbsp;·&nbsp;" if _p.get("avg_possession") else ""}
+                {"Def duel win <b style='color:#e0e0e0'>" + f"{_p['avg_def_duel_win_pct']:.0f}%" + "</b> &nbsp;·&nbsp;" if _p.get("avg_def_duel_win_pct") else ""}
+                {"Aerial win <b style='color:#e0e0e0'>" + f"{_p['avg_aerial_win_pct']:.0f}%" + "</b> &nbsp;·&nbsp;" if _p.get("avg_aerial_win_pct") else ""}
+                <b style='color:#e0e0e0'>{_wdl}</b> from {_p.get("matches",0)} games
+                </span></div>""",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption(f"No file match for '{target_club}' in {_n_clubs} available clubs — using manual context only.")
 
 # ── Generate narrative ────────────────────────────────────────────────────────
 if "narrative" not in st.session_state:
@@ -335,6 +390,7 @@ if generate_btn or regen_btn:
                     target_league=target_league,
                     club_need=club_need,
                     extra_notes=extra_notes,
+                    club_profile_context=_club_profile_context,
                 )
                 client = anthropic.Anthropic()
                 msg    = client.messages.create(
