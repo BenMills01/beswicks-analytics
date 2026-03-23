@@ -331,7 +331,9 @@ with st.sidebar:
         st.stop()
     player_names  = [p[0] for p in player_list]
     selected_name = st.selectbox("Select player", player_names)
-    selected_path = next(p[1] for p in player_list if p[0] == selected_name)
+    selected_path   = next(p[1] for p in player_list if p[0] == selected_name)
+    _player_updated = datetime.fromtimestamp(os.path.getmtime(selected_path)).strftime('%d %b %Y')
+    st.caption(f"Updated: {_player_updated}")
 
     st.markdown("---")
     st.markdown("### Peer group filters")
@@ -360,6 +362,11 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### Export")
+    report_audience = st.radio("Report audience", ["Internal", "Player", "Club"], horizontal=True,
+                               help="Changes colour treatment, section order, and header label in the PDF.")
+    if os.path.exists(PHYSICAL_CSV):
+        _phys_updated = datetime.fromtimestamp(os.path.getmtime(PHYSICAL_CSV)).strftime('%d %b %Y')
+        st.caption(f"Physical data: {_phys_updated}")
     export_btn = st.button("📄 Generate PDF report", use_container_width=True, help="Exports player profile, metrics, radar chart and match log as a branded PDF.")
     st.caption("Beswicks Sports Analytics · Internal Use Only")
 
@@ -834,196 +841,6 @@ st.dataframe(display_log,use_container_width=True,hide_index=True,height=520,
         "xA":    st.column_config.NumberColumn("xA", format="%.2f"),
     })
 
-# ── Player comparison ─────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Player comparison · vs League One & Two</div>', unsafe_allow_html=True)
-
-if league_df is None:
-    st.markdown('<div class="peer-banner peer-banner-warn">⚠ League Wyscout file not found in data/</div>', unsafe_allow_html=True)
-else:
-    search_q = st.text_input("Search for a player to compare", placeholder="Type a name...")
-    if search_q:
-        search_df = league_df if peer_league=='Both' else league_df[league_df['_league']==peer_league]
-        matches   = search_df[search_df['Player'].str.contains(search_q,case=False,na=False)]
-        if len(matches)==0:
-            st.info(f"No players found matching '{search_q}'.")
-        else:
-            opts       = (matches['Player']+" · "+matches['Team']+" · "+matches['Position']).tolist()
-            sel_opt    = st.selectbox("Select player", opts)
-            comp_row   = matches.iloc[opts.index(sel_opt)]
-
-            def cv(col):
-                v=comp_row.get(col); return round(float(v),3) if pd.notna(v) else None
-
-            comp = {
-                'goals_p90':         cv('Goals per 90'),
-                'assists_p90':       cv('Assists per 90'),
-                'xg_p90':            cv('xG per 90'),
-                'xa_p90':            cv('xA per 90'),
-                'shot_asts_p90':     cv('Shot assists per 90'),
-                'touches_box_p90':   cv('Touches in box per 90'),
-                'dribbles_p90':      cv('Dribbles per 90'),
-                'prog_runs_p90':     cv('Progressive runs per 90'),
-                'passes_p90':        cv('Passes per 90'),
-                'pass_acc':          cv('Accurate passes, %'),
-                'crosses_p90':       cv('Crosses per 90'),
-                'ptf3_p90':          cv('Passes to final third per 90'),
-                'duels_p90':         cv('Duels per 90'),
-                'duel_win':          cv('Duels won, %'),
-                'aerial_p90':        cv('Aerial duels per 90'),
-                'aerial_win':        cv('Aerial duels won, %'),
-                'interceptions_p90': cv('Interceptions per 90'),
-                'recoveries_p90':    cv('Successful defensive actions per 90'),
-                'def_duels_p90':     cv('Defensive duels per 90'),
-                'def_duel_win':      cv('Defensive duels won, %'),
-            }
-
-            # Look up physical stats for comparison player by name
-            comp_phys = {}
-            if phys_avgs is not None:
-                comp_name = comp_row.get('Player','')
-                # Try exact match first, then partial
-                phys_match = phys_avgs[phys_avgs['player_name'] == comp_name]
-                if len(phys_match) == 0:
-                    # Try matching by last name token
-                    parts = str(comp_name).split('.')
-                    if len(parts) > 1:
-                        surname = parts[-1].strip()
-                        phys_match = phys_avgs[phys_avgs['player_name'].str.contains(surname, case=False, na=False)]
-                if len(phys_match) > 0:
-                    pr = phys_match.iloc[0]
-                    comp_phys = {
-                        'total_dist_p90':  round(float(pr['total_dist_p90']),  1),
-                        'hsr_dist_p90':    round(float(pr['hsr_dist_p90']),    1),
-                        'sprint_dist_p90': round(float(pr['sprint_dist_p90']), 1),
-                        'psv99_avg':       round(float(pr['psv99_avg']),        2),
-                        'hi_accel_p90':    round(float(pr['hi_accel_p90']),    1),
-                    }
-                    comp.update(comp_phys)
-
-            comp_mins_str = f"{int(comp_row.get('Minutes played'))} mins" if pd.notna(comp_row.get('Minutes played')) else ""
-
-            ca,cvs,cb = st.columns([5,1,5])
-            with ca:
-                st.markdown(f"<div style='background:#0f0f0f;border-radius:8px;padding:14px 18px;border-left:4px solid {GOLD};margin:8px 0'><div style='font-size:1.1rem;font-weight:700;color:#fff'>{name}</div><div style='font-size:0.75rem;color:#888'>{club} · {pos} · {int(season['mins'])} mins</div></div>",unsafe_allow_html=True)
-            with cvs:
-                st.markdown("<div style='text-align:center;padding-top:22px;font-size:1rem;color:#555;font-weight:700'>vs</div>",unsafe_allow_html=True)
-            with cb:
-                st.markdown(f"<div style='background:#0f0f0f;border-radius:8px;padding:14px 18px;border-left:4px solid #3b82f6;margin:8px 0'><div style='font-size:1.1rem;font-weight:700;color:#fff'>{comp_row['Player']}</div><div style='font-size:0.75rem;color:#888'>{comp_row.get('Team','')} · {comp_row.get('Position','')} · {comp_mins_str}</div></div>",unsafe_allow_html=True)
-
-            COMP_METRICS = [
-                ("Total dist p90",'total_dist_p90',False),("HSR dist p90",'hsr_dist_p90',False),
-                ("Sprint dist p90",'sprint_dist_p90',False),("PSV99 avg",'psv99_avg',False),
-                ("Goals p90",'goals_p90',False),("Assists p90",'assists_p90',False),
-                ("xG p90",'xg_p90',False),("xA p90",'xa_p90',False),
-                ("Shot asts p90",'shot_asts_p90',False),("Touches box p90",'touches_box_p90',False),
-                ("Dribbles p90",'dribbles_p90',False),("Prog runs p90",'prog_runs_p90',False),
-                ("Passes p90",'passes_p90',False),("Pass acc %",'pass_acc',False),
-                ("Crosses p90",'crosses_p90',False),("PTF3 p90",'ptf3_p90',False),
-                ("Duels p90",'duels_p90',False),("Duel win %",'duel_win',False),
-                ("Aerial p90",'aerial_p90',False),("Aerial win %",'aerial_win',False),
-                ("Interceptions",'interceptions_p90',False),("Recoveries p90",'recoveries_p90',False),
-                ("Def duels p90",'def_duels_p90',False),("Def duel win %",'def_duel_win',False),
-            ]
-
-            def delta_html(c_val,x_val,inverse=False):
-                if c_val is None or x_val is None: return "<span style='color:#555;font-size:0.7rem'>–</span>"
-                diff=(c_val-x_val) if not inverse else (x_val-c_val)
-                if abs(diff)<0.005: return "<span style='color:#888;font-size:0.7rem'>=</span>"
-                col='#4ade80' if diff>0 else '#f87171'; ar='▲' if diff>0 else '▼'
-                return f"<span style='color:{col};font-size:0.7rem;font-weight:600'>{ar} {abs(diff):.2f}</span>"
-
-            def bar_html(pv):
-                if pv is None: return ''
-                c=pct_colour(pv)
-                return f"<div class='pbar-track'><div class='pbar-fill' style='width:{pv:.0f}%;background:{c};'></div></div>"
-
-            def comp_card(label,c_val,x_val,c_pct=None,x_pct=None,inverse=False):
-                fmt=lambda v:f"{v:.2f}" if v is not None else "–"
-                if c_val is not None and x_val is not None:
-                    a_bold="font-weight:700;color:#fff;" if (c_val>x_val)!=inverse else "color:#aaa;"
-                    b_bold="font-weight:700;color:#fff;" if (x_val>c_val)!=inverse else "color:#aaa;"
-                else: a_bold=b_bold="color:#aaa;"
-                return f"""<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:10px 12px;margin:4px 0'>
-                  <div style='font-size:0.65rem;color:#666;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px'>{label}</div>
-                  <div style='display:flex;align-items:center;justify-content:space-between'>
-                    <div style='{a_bold}font-size:1.1rem;line-height:1'>{fmt(c_val)}</div>
-                    <div style='text-align:center'>{delta_html(c_val,x_val,inverse)}</div>
-                    <div style='{b_bold}font-size:1.1rem;line-height:1;text-align:right'>{fmt(x_val)}</div>
-                  </div>
-                  <div style='display:flex;gap:8px;margin-top:5px'>
-                    <div style='flex:1'>{bar_html(c_pct)}</div>
-                    <div style='flex:1;transform:scaleX(-1)'>{bar_html(x_pct)}</div>
-                  </div>
-                </div>"""
-
-            half=len(COMP_METRICS)//2+1
-            cl,cr=st.columns(2)
-            for col,metrics in [(cl,COMP_METRICS[:half]),(cr,COMP_METRICS[half:])]:
-                col.markdown(f"<div style='display:flex;justify-content:space-between;margin-bottom:4px;padding:0 4px'><span style='font-size:0.7rem;color:{GOLD};font-weight:600'>{name}</span><span style='font-size:0.7rem;color:#3b82f6;font-weight:600'>{comp_row['Player']}</span></div>",unsafe_allow_html=True)
-                for label,key,inv in metrics:
-                    c_val=season.get(key); x_val=comp.get(key)
-                    c_pct=gp(key,c_val,inv)
-                    x_pct=percentile_rank(x_val,ws_peers[key],inverse=inv) if key in ws_peers and x_val is not None else None
-                    col.markdown(comp_card(label,c_val,x_val,c_pct,x_pct,inv),unsafe_allow_html=True)
-
-            # ── Percentile bar chart ──────────────────────────────────────────
-            if ws_peer_n >= 5:
-                st.markdown(f"<div class='section-header' style='margin-top:28px'>Percentile comparison · vs {ws_peer_n} position peers</div>",unsafe_allow_html=True)
-                CHART_METRICS=[
-                    ("Goals p90",'goals_p90',False),("xG p90",'xg_p90',False),
-                    ("Shot asts p90",'shot_asts_p90',False),("Dribbles p90",'dribbles_p90',False),
-                    ("Prog runs p90",'prog_runs_p90',False),("Crosses p90",'crosses_p90',False),
-                    ("Duels p90",'duels_p90',False),("Duel win %",'duel_win',False),
-                    ("Aerial p90",'aerial_p90',False),("Aerial win %",'aerial_win',False),
-                    ("Def duels p90",'def_duels_p90',False),("Def duel win %",'def_duel_win',False),
-                    ("Interceptions",'interceptions_p90',False),("Recoveries p90",'recoveries_p90',False),
-                    ("Pass acc %",'pass_acc',False),("Ball security",'losses_p90',True),
-                ]
-                chart_labels,client_pcts,comp_pcts=[],[],[]
-                for clabel,key,inv in CHART_METRICS:
-                    if key not in ws_peers: continue
-                    cp_c=percentile_rank(season.get(key),ws_peers[key],inverse=inv) if season.get(key) is not None else None
-                    cp_x=percentile_rank(comp.get(key),ws_peers[key],inverse=inv)   if comp.get(key)   is not None else None
-                    if cp_c is not None and cp_x is not None:
-                        chart_labels.append(clabel); client_pcts.append(cp_c); comp_pcts.append(cp_x)
-
-                if len(chart_labels)>=3:
-                    def pct_colours(pcts, opacity=1.0):
-                        def c(v):
-                            if v>=80:   return f'rgba(74,222,128,{opacity})'
-                            elif v>=55: return f'rgba(134,239,172,{opacity})'
-                            elif v>=35: return f'rgba(250,204,21,{opacity})'
-                            else:       return f'rgba(248,113,113,{opacity})'
-                        return [c(v) for v in pcts]
-                    fig_cmp=go.Figure()
-                    fig_cmp.add_bar(name=name,x=chart_labels,y=client_pcts,marker_color=pct_colours(client_pcts,1.0),
-                        hovertemplate='%{x}<br>'+name+': %{y:.0f}th percentile<extra></extra>')
-                    fig_cmp.add_bar(name=comp_row['Player'],x=chart_labels,y=comp_pcts,marker_color=pct_colours(comp_pcts,0.6),
-                        hovertemplate='%{x}<br>'+comp_row['Player']+': %{y:.0f}th percentile<extra></extra>')
-                    fig_cmp.add_scatter(x=chart_labels,y=[50]*len(chart_labels),mode='lines',
-                        name='50th percentile',line=dict(color='#444',width=1.5,dash='dash'),hoverinfo='skip')
-                    fig_cmp.update_layout(
-                        height=400, plot_bgcolor=PLOT_BG, paper_bgcolor=PAPER_BG,
-                        barmode='group',
-                        font=dict(color=TEXT_COL, size=11),
-                        yaxis=dict(range=[0,105],tickvals=[0,25,50,75,100],
-                            ticktext=['0','25th','50th','75th','100th'],
-                            gridcolor=GRID_COL,showgrid=True,tickfont=dict(size=10,color='#666'),zeroline=False),
-                        xaxis=dict(tickangle=-30,tickfont=dict(size=10,color='#888'),showgrid=False,gridcolor=GRID_COL),
-                        legend=dict(bgcolor='rgba(0,0,0,0)',font=dict(size=11,color='#aaa'),orientation='h',y=1.06),
-                        margin=dict(l=10,r=10,t=20,b=80),
-                        hovermode='x unified',hoverlabel=dict(bgcolor='#1a1a1a',font_size=11),
-                    )
-                    st.plotly_chart(fig_cmp,use_container_width=True)
-                    st.markdown("""<div style='display:flex;gap:16px;justify-content:center;margin-top:4px;flex-wrap:wrap'>
-                      <span style='font-size:0.7rem;color:#4ade80'>■ 80th+ percentile</span>
-                      <span style='font-size:0.7rem;color:#86efac'>■ 55–79th</span>
-                      <span style='font-size:0.7rem;color:#facc15'>■ 35–54th</span>
-                      <span style='font-size:0.7rem;color:#f87171'>■ Below 35th</span>
-                      <span style='font-size:0.7rem;color:#555'>--- 50th percentile</span>
-                    </div>""",unsafe_allow_html=True)
-
-
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
@@ -1060,6 +877,7 @@ if 'export_btn' in dir() and export_btn:
                     ws_peers=ws_peers, phys_peers=phys_peers,
                     ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
                     peer_desc=peer_desc,
+                    audience=report_audience.lower(),
                 )
                 filename = f"Beswicks_{name.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
                 st.download_button(

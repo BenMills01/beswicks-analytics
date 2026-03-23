@@ -224,11 +224,28 @@ def generate_pdf(
     ws, ph,
     radar_data, ws_peers, phys_peers,
     ws_peer_n, phys_peer_n, peer_desc,
+    audience='internal',
 ):
     """
     Build and return the PDF as bytes.
-    All chart figures are built fresh here so we don't depend on Streamlit session state.
+
+    Parameters
+    ----------
+    audience : str
+        One of 'internal', 'player', or 'club'. Controls section order,
+        radar placement, header label, and weaknesses table visibility.
+
+        - internal: Physical → Attacking → Defensive; radar on page 2;
+                    full strengths + weaknesses table; red for below-35th.
+        - player:   Attacking → Physical → Defensive; radar on page 2;
+                    full strengths + weaknesses table; yellow (not red) for below-35th.
+        - club:     Radar → Attacking → Defensive on page 1;
+                    physical table omitted from page 1;
+                    strengths-only table (no weaknesses shown).
     """
+    import pandas as pd
+    from scipy import stats as scipy_stats
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
@@ -237,7 +254,7 @@ def generate_pdf(
         title=f"Beswicks Sports — {name}",
     )
 
-    story = []
+    story    = []
     tmp_files = []  # track temp files to clean up
 
     def chart_image(fig, w_mm, h_mm, width_px=700, height_px=300):
@@ -245,19 +262,43 @@ def generate_pdf(
         tmp_files.append(path)
         return Image(path, width=w_mm*mm, height=h_mm*mm)
 
-    # ── Page 1: Profile + season metrics ─────────────────────────────────────
+    # Audience-specific colour: player reports soften red to yellow for below-35th
+    def _colour(pct_val):
+        if audience == 'player' and pct_val is not None and pct_val < 35:
+            return YELLOW
+        return pct_colour(pct_val)
 
-    # Header block
+    # ── Percentile helpers ────────────────────────────────────────────────────
+    def fill_pct(key, val, peers, inverse=False):
+        if key not in peers or val is None: return '–'
+        s = peers[key].dropna()
+        r = scipy_stats.percentileofscore(s, val, kind='rank')
+        r = round(100-r if inverse else r, 1)
+        return ordinal(r)
+
+    def ws_pct(key, val, inverse=False):
+        if key not in ws_peers or val is None: return '–'
+        s = ws_peers[key].dropna()
+        r = scipy_stats.percentileofscore(s, val, kind='rank')
+        return ordinal(round(100-r if inverse else r, 1))
+
+    # ── Audience label mapping ────────────────────────────────────────────────
+    _AUDIENCE_LABEL = {
+        'internal': 'INTERNAL ANALYSIS',
+        'player':   'PLAYER REPORT',
+        'club':     'CLUB REPORT',
+    }
+
+    # ── Page 1: Profile header ────────────────────────────────────────────────
     story.append(Paragraph(name, S_TITLE))
     story.append(Paragraph(f"{club}  ·  {league}  ·  Season 2025/26", S_CLUB))
     story.append(Spacer(1, 4))
 
-    # Tags row as a single-row table
     tags = [pos, f"Age {age_val}", f"{season['matches']} apps",
             f"{int(season['mins'])} mins", f"{date_start} – {date_end}",
             f"{season['goals_raw']}G · {season['assists_raw']}A",
             f"{season['yellow']} YC · {season['red']} RC"]
-    tag_cells = [[Paragraph(t, S_TAG) for t in tags]]
+    tag_cells  = [[Paragraph(t, S_TAG) for t in tags]]
     tag_widths = [(W - 2*MARGIN) / len(tags)] * len(tags)
     tag_tbl = Table(tag_cells, colWidths=tag_widths)
     tag_tbl.setStyle(TableStyle([
@@ -270,123 +311,124 @@ def generate_pdf(
         ('RIGHTPADDING',  (0,0), (-1,-1), 6),
         ('TOPPADDING',    (0,0), (-1,-1), 5),
         ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        ('BACKGROUND',    (0,0), (0,-1), HexColor('#2a2218')),  # position tag gold-tinted
+        ('BACKGROUND',    (0,0), (0,-1), HexColor('#2a2218')),
     ]))
     story.append(tag_tbl)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 3))
 
-    # Peer group info
+    # Audience label (small gold tag below tags row)
+    story.append(Paragraph(_AUDIENCE_LABEL.get(audience, 'INTERNAL ANALYSIS'), S_SECTION))
+
     peer_info = f"Peer group: {peer_desc}  ·  Wyscout peers: {ws_peer_n}  ·  Physical peers: {phys_peer_n}"
     story.append(Paragraph(peer_info, S_SMALL))
     story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=8))
 
-    # ── Physical metrics ──────────────────────────────────────────────────────
-    if phys:
-        story.append(Paragraph("PHYSICAL OUTPUT", S_SECTION))
+    # ── Build reusable metric sections ────────────────────────────────────────
+    cw  = [(W-2*MARGIN)*f for f in [0.5, 0.3, 0.2]]
+    cw2 = [(W-2*MARGIN)*f for f in [0.28,0.12,0.10, 0.28,0.12,0.10]]
+
+    def _phys_section():
+        """Physical output table flowables."""
+        if not phys:
+            return []
         phys_data = [
             ['Metric', 'Value', 'Percentile'],
-            ['Total distance p90', f"{int(phys['total_dist_p90']):,} m",
-             ordinal(phys_peers['total_dist_p90'].pipe(lambda s: __import__('scipy').stats.percentileofscore(s.dropna(), phys['total_dist_p90'], kind='rank')).round(1)) if 'total_dist_p90' in phys_peers else '–'],
-            ['HSR distance p90',   f"{int(phys['hsr_dist_p90'])} m",   '–'],
-            ['Sprint distance p90',f"{int(phys['sprint_dist_p90'])} m",'–'],
-            ['PSV99 avg',          str(phys['psv99_avg']),              '–'],
-            ['PSV99 peak',         str(phys['psv99_max']),              '–'],
-            ['COD count p90',      f"{phys['cod_p90']:.0f}",           '–'],
+            ['Total distance p90', f"{int(phys['total_dist_p90']):,} m", '–'],
+            ['HSR distance p90',   f"{int(phys['hsr_dist_p90'])} m",     '–'],
+            ['Sprint distance p90',f"{int(phys['sprint_dist_p90'])} m",  '–'],
+            ['PSV99 avg',          str(phys['psv99_avg']),                '–'],
+            ['PSV99 peak',         str(phys['psv99_max']),                '–'],
+            ['COD count p90',      f"{phys['cod_p90']:.0f}",             '–'],
         ]
-
-        # Fill percentiles properly
-        from scipy import stats as scipy_stats
-        def fill_pct(key, val, peers, inverse=False):
-            if key not in peers or val is None: return '–'
-            s = peers[key].dropna()
-            r = scipy_stats.percentileofscore(s, val, kind='rank')
-            r = round(100-r if inverse else r, 1)
-            return ordinal(r)
-
         phys_data[1][2] = fill_pct('total_dist_p90', phys.get('total_dist_p90'), phys_peers)
         phys_data[2][2] = fill_pct('hsr_dist_p90',   phys.get('hsr_dist_p90'),   phys_peers)
         phys_data[3][2] = fill_pct('sprint_dist_p90',phys.get('sprint_dist_p90'),phys_peers)
         phys_data[4][2] = fill_pct('psv99_avg',       phys.get('psv99_avg'),      phys_peers)
+        return [
+            Paragraph("PHYSICAL OUTPUT", S_SECTION),
+            dark_table([[Paragraph(str(c), S_BODY if i>0 else _style('hdr',fontSize=7,textColor=GOLD,fontName='Helvetica-Bold')) for i,c in enumerate(row)] for row in phys_data], cw),
+        ]
 
-        cw = [(W-2*MARGIN)*f for f in [0.5, 0.3, 0.2]]
-        story.append(dark_table([[Paragraph(str(c), S_BODY if i>0 else _style('hdr',fontSize=7,textColor=GOLD,fontName='Helvetica-Bold')) for i,c in enumerate(row)] for row in phys_data], cw))
+    def _atk_section():
+        """Attacking output table flowables."""
+        atk_data = [
+            ['Metric', 'Value', 'Percentile', 'Metric', 'Value', 'Percentile'],
+            ['Goals p90',      f"{season['goals_p90']:.2f}",     ws_pct('goals_p90',     season.get('goals_p90')),
+             'Shot asts p90',  f"{season['shot_asts_p90']:.2f}", ws_pct('shot_asts_p90', season.get('shot_asts_p90'))],
+            ['Assists p90',    f"{season['assists_p90']:.2f}",   ws_pct('assists_p90',   season.get('assists_p90')),
+             'Touches box p90',f"{season['touches_box_p90']:.2f}",ws_pct('touches_box_p90',season.get('touches_box_p90'))],
+            ['xG p90',         f"{season['xg_p90']:.2f}",        ws_pct('xg_p90',        season.get('xg_p90')),
+             'Dribbles p90',   f"{season['dribbles_p90']:.2f}",  ws_pct('dribbles_p90',  season.get('dribbles_p90'))],
+            ['xA p90',         f"{season['xa_p90']:.2f}",        ws_pct('xa_p90',        season.get('xa_p90')),
+             'Prog runs p90',  f"{season['prog_runs_p90']:.2f}", ws_pct('prog_runs_p90', season.get('prog_runs_p90'))],
+        ]
+        return [
+            Paragraph("ATTACKING OUTPUT", S_SECTION),
+            dark_table([[Paragraph(str(c),S_BODY) for c in row] for row in atk_data], cw2),
+        ]
 
-    # ── Attacking metrics ─────────────────────────────────────────────────────
-    story.append(Paragraph("ATTACKING OUTPUT", S_SECTION))
+    def _def_section():
+        """Defensive & passing output table flowables."""
+        def_data = [
+            ['Metric', 'Value', 'Percentile', 'Metric', 'Value', 'Percentile'],
+            ['Duels p90',      f"{season['duels_p90']:.1f}",     ws_pct('duels_p90',     season.get('duels_p90')),
+             'Passes p90',     f"{season['passes_p90']:.1f}",    ws_pct('passes_p90',    season.get('passes_p90'))],
+            ['Duel win %',     f"{season['duel_win']:.1f}%"    if season['duel_win']    else '–', ws_pct('duel_win',   season.get('duel_win')),
+             'Pass acc %',     f"{season['pass_acc']:.1f}%"    if season['pass_acc']    else '–', ws_pct('pass_acc',   season.get('pass_acc'))],
+            ['Aerial p90',     f"{season['aerial_p90']:.2f}",   ws_pct('aerial_p90',    season.get('aerial_p90')),
+             'Long pass p90',  f"{season['long_passes_p90']:.2f}",ws_pct('long_passes_p90',season.get('long_passes_p90'))],
+            ['Aerial win %',   f"{season['aerial_win']:.1f}%"  if season['aerial_win']  else '–', ws_pct('aerial_win', season.get('aerial_win')),
+             'Crosses p90',    f"{season['crosses_p90']:.2f}",  ws_pct('crosses_p90',   season.get('crosses_p90'))],
+            ['Def duels p90',  f"{season['def_duels_p90']:.2f}",ws_pct('def_duels_p90', season.get('def_duels_p90')),
+             'Interceptions p90',f"{season['interceptions_p90']:.2f}",ws_pct('interceptions_p90',season.get('interceptions_p90'))],
+            ['Def duel win %', f"{season['def_duel_win']:.1f}%" if season['def_duel_win'] else '–', ws_pct('def_duel_win',season.get('def_duel_win')),
+             'Recoveries p90', f"{season['recoveries_p90']:.2f}",ws_pct('recoveries_p90',season.get('recoveries_p90'))],
+            ['Losses p90',     f"{season['losses_p90']:.2f}",   ws_pct('losses_p90',   season.get('losses_p90'), True),
+             'Ball security rank','–','–'],
+        ]
+        return [
+            Paragraph("DEFENSIVE & PASSING OUTPUT", S_SECTION),
+            dark_table([[Paragraph(str(c),S_BODY) for c in row] for row in def_data], cw2),
+        ]
 
-    from scipy import stats as scipy_stats
-    def ws_pct(key, val, inverse=False):
-        if key not in ws_peers or val is None: return '–'
-        s = ws_peers[key].dropna()
-        r = scipy_stats.percentileofscore(s, val, kind='rank')
-        return ordinal(round(100-r if inverse else r, 1))
-
-    atk_data = [
-        ['Metric', 'Value', 'Percentile', 'Metric', 'Value', 'Percentile'],
-        ['Goals p90',      f"{season['goals_p90']:.2f}",    ws_pct('goals_p90',    season.get('goals_p90')),
-         'Shot asts p90',  f"{season['shot_asts_p90']:.2f}",ws_pct('shot_asts_p90',season.get('shot_asts_p90'))],
-        ['Assists p90',    f"{season['assists_p90']:.2f}",  ws_pct('assists_p90',  season.get('assists_p90')),
-         'Touches box p90',f"{season['touches_box_p90']:.2f}",ws_pct('touches_box_p90',season.get('touches_box_p90'))],
-        ['xG p90',         f"{season['xg_p90']:.2f}",       ws_pct('xg_p90',       season.get('xg_p90')),
-         'Dribbles p90',   f"{season['dribbles_p90']:.2f}", ws_pct('dribbles_p90', season.get('dribbles_p90'))],
-        ['xA p90',         f"{season['xa_p90']:.2f}",       ws_pct('xa_p90',       season.get('xa_p90')),
-         'Prog runs p90',  f"{season['prog_runs_p90']:.2f}",ws_pct('prog_runs_p90',season.get('prog_runs_p90'))],
-    ]
-    cw2 = [(W-2*MARGIN)*f for f in [0.28,0.12,0.10, 0.28,0.12,0.10]]
-    story.append(dark_table([[Paragraph(str(c),S_BODY) for c in row] for row in atk_data], cw2))
-
-    # ── Defensive + passing metrics ───────────────────────────────────────────
-    story.append(Paragraph("DEFENSIVE & PASSING OUTPUT", S_SECTION))
-    def_data = [
-        ['Metric', 'Value', 'Percentile', 'Metric', 'Value', 'Percentile'],
-        ['Duels p90',       f"{season['duels_p90']:.1f}",       ws_pct('duels_p90',       season.get('duels_p90')),
-         'Passes p90',      f"{season['passes_p90']:.1f}",      ws_pct('passes_p90',      season.get('passes_p90'))],
-        ['Duel win %',      f"{season['duel_win']:.1f}%" if season['duel_win'] else '–', ws_pct('duel_win',season.get('duel_win')),
-         'Pass acc %',      f"{season['pass_acc']:.1f}%" if season['pass_acc'] else '–', ws_pct('pass_acc', season.get('pass_acc'))],
-        ['Aerial p90',      f"{season['aerial_p90']:.2f}",      ws_pct('aerial_p90',      season.get('aerial_p90')),
-         'Long pass p90',   f"{season['long_passes_p90']:.2f}", ws_pct('long_passes_p90', season.get('long_passes_p90'))],
-        ['Aerial win %',    f"{season['aerial_win']:.1f}%" if season['aerial_win'] else '–', ws_pct('aerial_win',season.get('aerial_win')),
-         'Crosses p90',     f"{season['crosses_p90']:.2f}",     ws_pct('crosses_p90',     season.get('crosses_p90'))],
-        ['Def duels p90',   f"{season['def_duels_p90']:.2f}",   ws_pct('def_duels_p90',   season.get('def_duels_p90')),
-         'Interceptions p90',f"{season['interceptions_p90']:.2f}",ws_pct('interceptions_p90',season.get('interceptions_p90'))],
-        ['Def duel win %',  f"{season['def_duel_win']:.1f}%" if season['def_duel_win'] else '–', ws_pct('def_duel_win',season.get('def_duel_win')),
-         'Recoveries p90',  f"{season['recoveries_p90']:.2f}",  ws_pct('recoveries_p90',  season.get('recoveries_p90'))],
-        ['Losses p90',      f"{season['losses_p90']:.2f}",      ws_pct('losses_p90',      season.get('losses_p90'), True),
-         'Ball security rank','–','–'],
-    ]
-    story.append(dark_table([[Paragraph(str(c),S_BODY) for c in row] for row in def_data], cw2))
-
-    story.append(PageBreak())
-
-    # ── Page 2: Radar chart ───────────────────────────────────────────────────
-    if len(radar_data) >= 5:
-        story.append(Paragraph("PERCENTILE PROFILE", S_SECTION))
-
+    def _radar_section(show_weaknesses=True):
+        """Radar chart + strengths/weaknesses table flowables."""
+        if len(radar_data) < 5:
+            return []
         fig_radar = build_radar_fig(radar_data, name)
-        story.append(chart_image(fig_radar, w_mm=120, h_mm=95, width_px=480, height_px=380))
-        story.append(Spacer(1, 6))
-
-        # Strengths / weaknesses side note as a table
+        items = [
+            Paragraph("PERCENTILE PROFILE", S_SECTION),
+            chart_image(fig_radar, w_mm=120, h_mm=95, width_px=480, height_px=380),
+            Spacer(1, 6),
+        ]
         top3    = sorted(radar_data.items(), key=lambda x: x[1], reverse=True)[:3]
         bottom3 = sorted(radar_data.items(), key=lambda x: x[1])[:3]
-
-        sw_data = [['STRENGTHS', '', 'BELOW AVERAGE', '']]
-        for i in range(3):
-            lbl_s, val_s = top3[i]
-            lbl_b, val_b = bottom3[i]
-            sw_data.append([
-                Paragraph(lbl_s, S_BODY),
-                Paragraph(f'<font color="#4ade80"><b>{ordinal(val_s)}</b></font>', S_BODY),
-                Paragraph(lbl_b, S_BODY),
-                Paragraph(f'<font color="#f87171"><b>{ordinal(val_b)}</b></font>', S_BODY),
-            ])
-
-        cw_sw = [(W-2*MARGIN)*f for f in [0.33,0.17,0.33,0.17]]
+        if show_weaknesses:
+            sw_data = [['STRENGTHS', '', 'BELOW AVERAGE', '']]
+            for i in range(3):
+                lbl_s, val_s = top3[i]
+                lbl_b, val_b = bottom3[i]
+                sw_data.append([
+                    Paragraph(lbl_s, S_BODY),
+                    Paragraph(f'<font color="#4ade80"><b>{ordinal(val_s)}</b></font>', S_BODY),
+                    Paragraph(lbl_b, S_BODY),
+                    Paragraph(f'<font color="#f87171"><b>{ordinal(val_b)}</b></font>', S_BODY),
+                ])
+            cw_sw = [(W-2*MARGIN)*f for f in [0.33,0.17,0.33,0.17]]
+        else:
+            # Club: strengths only
+            sw_data = [['STRENGTHS', '']]
+            for lbl_s, val_s in top3:
+                sw_data.append([
+                    Paragraph(lbl_s, S_BODY),
+                    Paragraph(f'<font color="#4ade80"><b>{ordinal(val_s)}</b></font>', S_BODY),
+                ])
+            cw_sw = [(W-2*MARGIN)*f for f in [0.66, 0.34]]
         sw_tbl = Table(sw_data, colWidths=cw_sw)
         sw_tbl.setStyle(TableStyle([
             ('BACKGROUND',    (0,0), (-1,0),  GREY1),
             ('TEXTCOLOR',     (0,0), (1,0),   HexColor('#4ade80')),
-            ('TEXTCOLOR',     (2,0), (3,0),   HexColor('#f87171')),
+            ('TEXTCOLOR',     (2,0), (3,0),   HexColor('#f87171')) if show_weaknesses else ('TEXTCOLOR',(0,0),(-1,0),HexColor('#4ade80')),
             ('FONTNAME',      (0,0), (-1,0),  'Helvetica-Bold'),
             ('FONTSIZE',      (0,0), (-1,0),  7),
             ('ROWBACKGROUNDS',(0,1),(-1,-1),  [GREY1, BG]),
@@ -396,10 +438,43 @@ def generate_pdf(
             ('TOPPADDING',    (0,0), (-1,-1), 4),
             ('BOTTOMPADDING', (0,0), (-1,-1), 4),
         ]))
-        story.append(sw_tbl)
-        story.append(Spacer(1, 10))
+        items += [sw_tbl, Spacer(1, 10)]
+        return items
 
-    # ── Physical chart ────────────────────────────────────────────────────────
+    # ── Assemble Page 1 based on audience ────────────────────────────────────
+    if audience == 'club':
+        # Club: radar first, then attacking, then defensive; no physical table on p1
+        for item in _radar_section(show_weaknesses=False):
+            story.append(item)
+        for item in _atk_section():
+            story.append(item)
+        for item in _def_section():
+            story.append(item)
+    elif audience == 'player':
+        # Player: attacking → physical → defensive
+        for item in _atk_section():
+            story.append(item)
+        for item in _phys_section():
+            story.append(item)
+        for item in _def_section():
+            story.append(item)
+    else:
+        # Internal (default): physical → attacking → defensive
+        for item in _phys_section():
+            story.append(item)
+        for item in _atk_section():
+            story.append(item)
+        for item in _def_section():
+            story.append(item)
+
+    story.append(PageBreak())
+
+    # ── Page 2: Radar + physical chart ───────────────────────────────────────
+    # Club already showed radar on page 1; show physical chart here for all
+    if audience != 'club':
+        for item in _radar_section(show_weaknesses=True):
+            story.append(item)
+
     if ph is not None and 'dist_p90_m' in ph.columns:
         story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=6))
         story.append(Paragraph("PHYSICAL OUTPUT · MATCH BY MATCH", S_SECTION))
@@ -420,15 +495,16 @@ def generate_pdf(
     story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=6))
     story.append(Paragraph("MATCH LOG", S_SECTION))
 
-    log_cols = ['Match','Date','Min','G','A','xG','xA','Pass%','Duel%','Aer%','DefD%','Int','Loss']
+    log_cols   = ['Match','Date','Min','G','A','xG','xA','Pass%','Duel%','Aer%','DefD%','Int','Loss']
     log_header = [Paragraph(c, _style('lh', fontSize=6.5, textColor=GOLD, fontName='Helvetica-Bold')) for c in log_cols]
     log_rows   = [log_header]
 
+    def sp(n, d):
+        return f"{int(round(n/d*100))}%" if d > 0 else "-"
+
     for _, r in ws.sort_values('Date', ascending=False).iterrows():
-        def sp(n,d): return f"{int(round(n/d*100))}%" if d>0 else "-"
-        import pandas as pd
         row_data = [
-            Paragraph(str(r['match_label'])[:32], _style('lc',fontSize=6.5,textColor=LGREY)),
+            Paragraph(str(r['match_label'])[:32],  _style('lc',fontSize=6.5,textColor=LGREY)),
             Paragraph(pd.to_datetime(r['Date']).strftime('%d %b') if pd.notna(r['Date']) else '', _style('lc',fontSize=6.5,textColor=GREY3)),
             Paragraph(str(int(r['Minutes played'])),   _style('lc',fontSize=6.5,textColor=LGREY)),
             Paragraph(str(int(r['Goals'])),            _style('lc',fontSize=6.5,textColor=LGREY if r['Goals']==0 else '#4ade80',fontName='Helvetica-Bold' if r['Goals']>0 else 'Helvetica')),
@@ -444,8 +520,7 @@ def generate_pdf(
         ]
         log_rows.append(row_data)
 
-    # Column widths
-    avail = W - 2*MARGIN
+    avail  = W - 2*MARGIN
     log_cw = [avail*f for f in [0.22,0.07,0.05,0.04,0.04,0.06,0.06,0.07,0.07,0.06,0.07,0.05,0.05]]
     log_tbl = Table(log_rows, colWidths=log_cw, repeatRows=1)
     log_tbl.setStyle(TableStyle([
@@ -463,7 +538,6 @@ def generate_pdf(
     # ── Build ─────────────────────────────────────────────────────────────────
     doc.build(story, onFirstPage=_draw_background, onLaterPages=_draw_background)
 
-    # Clean up temp image files
     for f in tmp_files:
         try: os.unlink(f)
         except Exception: pass
