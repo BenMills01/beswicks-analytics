@@ -225,6 +225,8 @@ def generate_pdf(
     radar_data, ws_peers, phys_peers,
     ws_peer_n, phys_peer_n, peer_desc,
     audience='internal',
+    narrative_text: str = None,
+    club_name: str = None,
 ):
     """
     Build and return the PDF as bytes.
@@ -534,6 +536,21 @@ def generate_pdf(
         ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
     ]))
     story.append(log_tbl)
+
+    # ── Optional narrative page (club analysis) ────────────────────────────────
+    if narrative_text:
+        story.append(PageBreak())
+        story.append(Paragraph("CLUB FIT ANALYSIS", S_SECTION))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=10))
+        S_NARRATIVE = _style('narr', fontSize=9, textColor=LGREY, leading=14, spaceAfter=8)
+        for para in narrative_text.strip().split('\n\n'):
+            if para.strip():
+                story.append(Paragraph(para.strip().replace('\n', ' '), S_NARRATIVE))
+        story.append(Spacer(1, 16))
+        story.append(HRFlowable(width='100%', thickness=0.3, color=GREY2))
+        story.append(Spacer(1, 6))
+        footer_text = f"Prepared for {club_name} — Beswicks Sports Management" if club_name else "Beswicks Sports Management"
+        story.append(Paragraph(footer_text, _style('nf', fontSize=7, textColor=GREY3, alignment=TA_CENTER)))
 
     # ── Build ─────────────────────────────────────────────────────────────────
     doc.build(story, onFirstPage=_draw_background, onLaterPages=_draw_background)

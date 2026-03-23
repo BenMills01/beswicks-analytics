@@ -1,0 +1,445 @@
+"""
+pages/club_report.py
+Beswicks Sports Analytics — Club Analysis Report
+
+Generate a transfer pitch for a specific club. Uses the Anthropic API
+to write a data-backed narrative, then exports a club-audience PDF with
+the narrative appended as the final page.
+"""
+
+import streamlit as st
+import pandas as pd
+import os
+import glob
+from datetime import datetime
+
+import anthropic
+
+from src.metrics import (
+    get_season_totals, get_physical_totals, build_match_log,
+    build_physical_peers, build_wyscout_peers, build_physical_season_averages,
+    p90, pct, percentile_rank, parse_wyscout_label, parse_physical_label,
+    MIN_PEER_N, CONF_THRESHOLD,
+)
+
+st.set_page_config(
+    page_title="Beswicks | Club Report",
+    page_icon="🏟️",
+    layout="wide",
+)
+
+# ── Dark CSS ───────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+[data-testid="stSidebar"] { background: #0f0f0f; }
+[data-testid="stSidebar"] * { color: #e0e0e0 !important; }
+.header-bar {
+    background: #0f0f0f; padding: 18px 28px; border-radius: 10px;
+    margin-bottom: 20px; display: flex; align-items: center;
+    justify-content: space-between;
+}
+.header-bar h1 { color: #fff; font-size: 1.35rem; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+.header-bar .sub { color: #888; font-size: 0.78rem; margin-top: 2px; }
+.beswicks-badge {
+    background: #c8a45a; color: #0f0f0f; font-size: 0.7rem;
+    font-weight: 700; letter-spacing: 0.08em; padding: 4px 10px;
+    border-radius: 4px; text-transform: uppercase;
+}
+.section-header { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #c8a45a; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #2a2a2a; }
+.narrative-box { background: #0f0f0f; border-left: 4px solid #c8a45a; border-radius: 0 8px 8px 0; padding: 20px 24px; margin: 12px 0; line-height: 1.7; color: #ccc; font-size: 0.9rem; }
+</style>
+""", unsafe_allow_html=True)
+
+GOLD = '#c8a45a'
+
+DATA_DIR     = "data"
+PLAYERS_DIR  = os.path.join(DATA_DIR, "players")
+PHYSICAL_CSV = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
+WS_FILES = {
+    'League One': {
+        'all':              os.path.join(DATA_DIR, "League One min 874 mins.xlsx"),
+        'Central Defender': os.path.join(DATA_DIR, "League One Central Defenders.xlsx"),
+        'Full Back':        os.path.join(DATA_DIR, "League One Full Back:Wing Back.xlsx"),
+        'Central Mid':      os.path.join(DATA_DIR, "League One Central Midfielders.xlsx"),
+        'Att Mid':          os.path.join(DATA_DIR, "League One Attacking Midfielders.xlsx"),
+        'Wide Mid':         os.path.join(DATA_DIR, "League One Wide Midfielders.xlsx"),
+        'Center Forward':   os.path.join(DATA_DIR, "League One CF's.xlsx"),
+        'Goalkeeper':       os.path.join(DATA_DIR, "League One GKs.xlsx"),
+    },
+    'League Two': {
+        'all':              os.path.join(DATA_DIR, "League Two min 874 mins.xlsx"),
+        'Central Defender': os.path.join(DATA_DIR, "League Two Central Defenders.xlsx"),
+        'Full Back':        os.path.join(DATA_DIR, "League Two FB:WB.xlsx"),
+        'Central Mid':      os.path.join(DATA_DIR, "League Two Central Midfielders.xlsx"),
+        'Att Mid':          os.path.join(DATA_DIR, "League Two Attacking Midfielders.xlsx"),
+        'Wide Mid':         os.path.join(DATA_DIR, "League Two Wide Midfielders.xlsx"),
+        'Center Forward':   os.path.join(DATA_DIR, "League Two CFs.xlsx"),
+        'Goalkeeper':       os.path.join(DATA_DIR, "League Two GKs.xlsx"),
+    },
+}
+
+
+def get_player_list():
+    pattern = os.path.join(os.path.abspath(PLAYERS_DIR), "*_master.xlsx")
+    files   = sorted(glob.glob(pattern))
+    return [(os.path.basename(f).replace("_master.xlsx", "").replace("_", " "), f) for f in files]
+
+
+@st.cache_data
+def load_master(filepath):
+    xls = pd.ExcelFile(filepath)
+    return {s: pd.read_excel(xls, sheet_name=s)
+            for s in ['Wyscout', 'Physical', 'Pressing', 'Off_Ball_Runs', 'Match_by_Match']
+            if s in xls.sheet_names}
+
+
+@st.cache_data
+def load_physical_csv():
+    if not os.path.exists(PHYSICAL_CSV):
+        return None
+    return pd.read_csv(PHYSICAL_CSV, parse_dates=['match_date'])
+
+
+@st.cache_data
+def _cached_phys_avgs(phys_csv):
+    return build_physical_season_averages(phys_csv)
+
+
+@st.cache_data
+def find_player_position_file(player_short_name):
+    for league in ['League One', 'League Two']:
+        for pos_key, path in WS_FILES[league].items():
+            if pos_key == 'all' or not os.path.exists(path):
+                continue
+            df = pd.read_excel(path)
+            if player_short_name in df['Player'].values:
+                return pos_key
+    return None
+
+
+def _fmt(v, d=2, fallback='–'):
+    if v is None:
+        return fallback
+    return f"{v:.{d}f}"
+
+
+def _build_prompt(
+    name, club, pos, age, matches, mins, goals, assists,
+    season, phys, ws_peers, phys_peers, ws_peer_n, phys_peer_n,
+    target_club, target_league, club_need, extra_notes,
+) -> str:
+    """Build the Anthropic prompt for the transfer pitch narrative."""
+
+    def pr(key, val, inverse=False, peers=None):
+        p = peers or ws_peers
+        if key not in p or val is None:
+            return ''
+        r = percentile_rank(val, p[key], inverse=inverse)
+        return f" ({int(r)}th pct)" if r is not None else ''
+
+    lines = [
+        "You are an elite football analyst writing a transfer pitch for Beswicks Sports Management.\n",
+        f"PLAYER: {name} | {pos} | {club} | Age {age}",
+        f"SEASON 2025/26: {matches} apps · {mins:,} mins · {goals}G · {assists}A",
+        f"PEER GROUP: {ws_peer_n} position peers (League One/Two)\n",
+        "KEY STATISTICS (value — percentile vs position peers):",
+    ]
+
+    stat_lines = []
+    def add(label, key, val, inverse=False, fmt='.2f', suffix='', peers=None):
+        if val is not None:
+            stat_lines.append(f"  {label}: {val:{fmt}}{suffix}{pr(key, val, inverse, peers)}")
+
+    add("Goals p90",          'goals_p90',        season.get('goals_p90'))
+    add("xG p90",             'xg_p90',           season.get('xg_p90'))
+    add("Assists p90",        'assists_p90',       season.get('assists_p90'))
+    add("xA p90",             'xa_p90',            season.get('xa_p90'))
+    add("Shot assists p90",   'shot_asts_p90',     season.get('shot_asts_p90'))
+    add("Dribbles p90",       'dribbles_p90',      season.get('dribbles_p90'))
+    add("Prog runs p90",      'prog_runs_p90',     season.get('prog_runs_p90'))
+    add("Passes p90",         'passes_p90',        season.get('passes_p90'),  fmt='.1f')
+    add("Pass accuracy",      'pass_acc',          season.get('pass_acc'),    fmt='.1f', suffix='%')
+    add("Crosses p90",        'crosses_p90',       season.get('crosses_p90'))
+    add("Duels p90",          'duels_p90',         season.get('duels_p90'),   fmt='.1f')
+    add("Duel win %",         'duel_win',          season.get('duel_win'),    fmt='.1f', suffix='%')
+    add("Aerial p90",         'aerial_p90',        season.get('aerial_p90'))
+    add("Aerial win %",       'aerial_win',        season.get('aerial_win'),  fmt='.1f', suffix='%')
+    add("Def duels p90",      'def_duels_p90',     season.get('def_duels_p90'))
+    add("Def duel win %",     'def_duel_win',      season.get('def_duel_win'), fmt='.1f', suffix='%')
+    add("Interceptions p90",  'interceptions_p90', season.get('interceptions_p90'))
+    add("Recoveries p90",     'recoveries_p90',    season.get('recoveries_p90'))
+    add("Ball losses p90",    'losses_p90',        season.get('losses_p90'),  inverse=True)
+
+    lines += stat_lines
+
+    if phys and phys_peer_n >= MIN_PEER_N:
+        lines.append(f"\nPHYSICAL PROFILE (vs {phys_peer_n} position peers):")
+        for label, key in [
+            ("Total dist p90", 'total_dist_p90'), ("HSR dist p90", 'hsr_dist_p90'),
+            ("Sprint dist p90", 'sprint_dist_p90'), ("PSV99 avg", 'psv99_avg'),
+            ("Hi-accel p90", 'hi_accel_p90'),
+        ]:
+            val = phys.get(key)
+            if val is not None:
+                lines.append(f"  {label}: {val:.1f}{pr(key, val, peers=phys_peers)}")
+
+    lines += [
+        f"\nTARGET CLUB: {target_club}",
+        f"DIVISION: {target_league}",
+        f"WHAT THEY NEED: {club_need}",
+    ]
+    if extra_notes.strip():
+        lines.append(f"ADDITIONAL CONTEXT: {extra_notes}")
+
+    lines += [
+        "\n---",
+        "Write a concise, confident transfer pitch (4 paragraphs, approximately 280–320 words total).",
+        "Structure:",
+        "  1. Player overview and headline offer — what type of player and what they provide",
+        "  2. Statistical case — lead with the 3-4 metrics most relevant to what the club needs, all backed by data and percentile context",
+        "  3. Physical and pressing profile — concrete numbers, what they mean for this club's style",
+        "  4. Summary recommendation and fit argument — why this player suits this specific club",
+        "",
+        "Rules:",
+        "- Every claim must be backed by a specific figure from the data above",
+        "- Include percentile ranks in prose where relevant: e.g. '78th percentile among League One central defenders'",
+        "- Club-audience tone: confident, professional, no hedging",
+        "- Do not mention weaknesses or below-average metrics",
+        "- No vague praise ('dynamic presence', 'hard worker', 'quality player')",
+        "- No em dashes",
+        "- No bullet points — narrative paragraphs only",
+        "- Write in third person",
+    ]
+
+    return '\n'.join(lines)
+
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="header-bar">
+  <div><h1>Club Analysis Report</h1><div class="sub">AI-generated transfer pitch · Club audience</div></div>
+  <div class="beswicks-badge">Beswicks Sports</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 🏟️ Club Report")
+    st.markdown("---")
+    player_list = get_player_list()
+    if not player_list:
+        st.warning("No player files found.")
+        st.stop()
+
+    player_names  = [p[0] for p in player_list]
+    selected_name = st.selectbox("Select player", player_names)
+    selected_path = next(p[1] for p in player_list if p[0] == selected_name)
+
+    st.markdown("---")
+    st.markdown("### Peer group filters")
+    min_mins_peer = st.slider("Min minutes", 450, 1800, 900, 90)
+    peer_league   = st.radio("League", ["Both", "League One", "League Two"], horizontal=True)
+
+# ── Load data ─────────────────────────────────────────────────────────────────
+with st.spinner(f"Loading {selected_name}..."):
+    sheets   = load_master(selected_path)
+    phys_csv = load_physical_csv()
+
+ws_raw = sheets.get('Wyscout')
+ph_raw = sheets.get('Physical')
+
+if ws_raw is None:
+    st.error(f"No Wyscout sheet found for {selected_name}.")
+    st.stop()
+
+ws = ws_raw[ws_raw['Minutes played'] >= 20].copy().sort_values('Date').reset_index(drop=True)
+ph = ph_raw[ph_raw['minutes_full_all'] >= 20].copy().sort_values('match_date').reset_index(drop=True) if ph_raw is not None else None
+
+club   = ph_raw['team_name'].iloc[0]      if ph_raw is not None and 'team_name'      in ph_raw.columns else ""
+pos    = ph_raw['position_group'].iloc[0] if ph_raw is not None and 'position_group' in ph_raw.columns else ""
+short  = ph_raw['player_short_name'].iloc[0] if ph_raw is not None and 'player_short_name' in ph_raw.columns else selected_name
+
+season = get_season_totals(ws)
+phys   = get_physical_totals(ph) if ph is not None else None
+
+try:
+    date_start = pd.to_datetime(ws['Date'].min()).strftime('%d %b %Y')
+    date_end   = pd.to_datetime(ws['Date'].max()).strftime('%d %b %Y')
+except Exception:
+    date_start, date_end = '–', '–'
+
+ws_pos_key = find_player_position_file(short) if short else None
+ws_peers, ws_peer_n     = build_wyscout_peers(ws_pos_key, peer_league, min_mins_peer, WS_FILES) if ws_pos_key else ({}, 0)
+phys_peers, phys_peer_n = build_physical_peers(phys_csv, pos, min_mins_peer, peer_league)
+
+# Merge phys into season for easy lookup
+if phys:
+    season_combined = {**season, **phys}
+else:
+    season_combined = season
+
+# ── Club context inputs ────────────────────────────────────────────────────────
+st.markdown('<div class="section-header">Target club</div>', unsafe_allow_html=True)
+
+col_a, col_b = st.columns(2)
+with col_a:
+    target_club   = st.text_input("Club name", placeholder="e.g. Bristol City")
+    target_league = st.text_input("League / division", placeholder="e.g. Championship")
+with col_b:
+    club_need     = st.text_area("What the club needs", height=76,
+                                  placeholder="e.g. Ball-playing centre-back, comfortable in a high line, aggressive press, can step out with the ball")
+    extra_notes   = st.text_area("Additional context (optional)", height=76,
+                                  placeholder="e.g. New manager rebuilding defensively, lost their first-choice CB to injury")
+
+if not target_club:
+    st.info("Enter the target club name to generate a report.")
+    st.stop()
+
+# ── Generate narrative ────────────────────────────────────────────────────────
+if "narrative" not in st.session_state:
+    st.session_state.narrative = None
+if "narrative_player" not in st.session_state:
+    st.session_state.narrative_player = None
+if "narrative_club" not in st.session_state:
+    st.session_state.narrative_club = None
+
+col_gen, col_regen = st.columns([3, 1])
+with col_gen:
+    generate_btn = st.button("✨ Generate report", use_container_width=True, type="primary")
+with col_regen:
+    regen_btn = st.button("↺ Regenerate", use_container_width=True,
+                          disabled=(st.session_state.narrative is None or
+                                    st.session_state.narrative_player != selected_name or
+                                    st.session_state.narrative_club   != target_club))
+
+if generate_btn or regen_btn:
+    if not club_need.strip():
+        st.warning("Please describe what the club needs before generating.")
+    else:
+        with st.spinner("Generating transfer pitch narrative..."):
+            try:
+                prompt = _build_prompt(
+                    name=selected_name, club=club, pos=pos, age=24,
+                    matches=int(season.get('matches', 0)),
+                    mins=int(season.get('mins', 0)),
+                    goals=int(season.get('goals_raw', 0)),
+                    assists=int(season.get('assists_raw', 0)),
+                    season=season_combined,
+                    phys=phys,
+                    ws_peers=ws_peers, phys_peers=phys_peers,
+                    ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
+                    target_club=target_club,
+                    target_league=target_league,
+                    club_need=club_need,
+                    extra_notes=extra_notes,
+                )
+                client = anthropic.Anthropic()
+                msg    = client.messages.create(
+                    model='claude-opus-4-6',
+                    max_tokens=700,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                st.session_state.narrative        = msg.content[0].text
+                st.session_state.narrative_player = selected_name
+                st.session_state.narrative_club   = target_club
+            except anthropic.APIConnectionError:
+                st.error("Could not connect to the Anthropic API. Check your ANTHROPIC_API_KEY environment variable.")
+            except Exception as e:
+                st.error(f"Narrative generation failed: {e}")
+                st.exception(e)
+
+# ── Narrative preview ─────────────────────────────────────────────────────────
+if (st.session_state.narrative and
+        st.session_state.narrative_player == selected_name and
+        st.session_state.narrative_club   == target_club):
+
+    st.markdown('<div class="section-header">Transfer pitch narrative</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='narrative-box'>{st.session_state.narrative.replace(chr(10), '<br><br>')}</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── PDF export ────────────────────────────────────────────────────────────
+    st.markdown("---")
+    try:
+        from generate_report import generate_pdf
+        PDF_OK = True
+    except Exception:
+        PDF_OK = False
+
+    if PDF_OK:
+        if st.button("📄 Export club report PDF", use_container_width=True):
+            with st.spinner("Building PDF — this may take a few seconds..."):
+                try:
+                    # Prepare ws/ph with derived columns for form charts
+                    ws_pdf = ws.copy()
+                    if 'match_label' not in ws_pdf.columns:
+                        ws_pdf['match_label']      = ws_pdf.apply(lambda r: parse_wyscout_label(r['Match'], club), axis=1)
+                    if 'duel_win_pct' not in ws_pdf.columns:
+                        ws_pdf['duel_win_pct']     = ws_pdf.apply(lambda r: pct(r.iloc[21], r['Duels']), axis=1)
+                        ws_pdf['def_duel_win_pct'] = ws_pdf.apply(lambda r: pct(r.iloc[32], r.iloc[31]), axis=1)
+
+                    ph_pdf = None
+                    if ph is not None:
+                        ph_pdf = ph.copy()
+                        if 'match_label' not in ph_pdf.columns:
+                            ph_pdf['match_label']  = ph_pdf.apply(lambda r: parse_physical_label(r['match_name'], r['team_name']), axis=1)
+                            ph_pdf['dist_p90_m']   = ph_pdf.apply(lambda r: p90(r['total_distance_full_all'],  r['minutes_full_all']), axis=1)
+                            ph_pdf['hsr_p90_m']    = ph_pdf.apply(lambda r: p90(r['hsr_distance_full_all'],    r['minutes_full_all']), axis=1)
+                            ph_pdf['sprint_p90_m'] = ph_pdf.apply(lambda r: p90(r['sprint_distance_full_all'], r['minutes_full_all']), axis=1)
+
+                    # Build radar data
+                    radar_keys = [
+                        ('Goals p90','goals_p90',False), ('xG p90','xg_p90',False),
+                        ('Shot asts p90','shot_asts_p90',False), ('Pass acc %','pass_acc',False),
+                        ('Dribbles p90','dribbles_p90',False), ('Prog runs p90','prog_runs_p90',False),
+                        ('Crosses p90','crosses_p90',False), ('Duels p90','duels_p90',False),
+                        ('Duel win %','duel_win',False), ('Aerial p90','aerial_p90',False),
+                        ('Interceptions','interceptions_p90',False), ('Recoveries p90','recoveries_p90',False),
+                    ]
+                    if phys and phys_peer_n >= MIN_PEER_N:
+                        radar_keys += [('HSR dist p90','hsr_dist_p90',False), ('Sprint dist p90','sprint_dist_p90',False)]
+
+                    radar_data = {}
+                    for label, key, inv in radar_keys:
+                        val = season_combined.get(key)
+                        if val is None:
+                            continue
+                        p_src = phys_peers if key in phys_peers else ws_peers
+                        pct_v = percentile_rank(val, p_src.get(key), inverse=inv) if key in p_src else None
+                        if pct_v is not None:
+                            radar_data[label] = pct_v
+
+                    pdf_bytes = generate_pdf(
+                        name=selected_name, club=club, league=target_league or "", pos=pos,
+                        age_val=24,
+                        date_start=date_start, date_end=date_end,
+                        season=season, phys=phys,
+                        ws=ws_pdf, ph=ph_pdf,
+                        radar_data=radar_data,
+                        ws_peers=ws_peers, phys_peers=phys_peers,
+                        ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
+                        peer_desc=f"{peer_league} · {min_mins_peer}+ mins",
+                        audience='club',
+                        narrative_text=st.session_state.narrative,
+                        club_name=target_club,
+                    )
+
+                    safe_name = selected_name.replace(' ', '_')
+                    safe_club = target_club.replace(' ', '_')
+                    filename  = f"Beswicks_{safe_name}_{safe_club}_club_report.pdf"
+                    st.download_button(
+                        "⬇ Download PDF",
+                        data=pdf_bytes,
+                        file_name=filename,
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"PDF generation failed: {e}")
+                    st.exception(e)
+    else:
+        st.info("PDF export requires `kaleido` and `reportlab`.")
