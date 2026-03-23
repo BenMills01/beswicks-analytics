@@ -15,6 +15,8 @@ import tempfile
 import os
 from datetime import datetime
 
+from src.metrics import ordinal
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -71,13 +73,7 @@ def pct_colour(pct_val):
     if pct_val >= 35:   return YELLOW
     return RED
 
-def ordinal(n):
-    n = int(n); s = str(n)
-    if s.endswith(('11','12','13')): return f"{n}th"
-    if s.endswith('1'): return f"{n}st"
-    if s.endswith('2'): return f"{n}nd"
-    if s.endswith('3'): return f"{n}rd"
-    return f"{n}th"
+# ordinal imported from src.metrics
 
 # ── Chart → PNG bytes (via kaleido) ──────────────────────────────────────────
 def fig_to_bytes(fig, width=700, height=320):

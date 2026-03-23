@@ -8,6 +8,15 @@ from scipy import stats as scipy_stats
 import os
 import glob
 
+from src.metrics import (
+    p90, pct, percentile_rank, ordinal, pct_colour,
+    rolling_avg, mins_to_opacity, rgba, colour_list,
+    parse_wyscout_label, parse_physical_label,
+    get_season_totals, get_physical_totals, build_match_log,
+    build_physical_peers, build_wyscout_peers, build_physical_season_averages,
+    METRIC_DESC, MIN_PEER_N, CONF_THRESHOLD,
+)
+
 # PDF export (graceful fallback if kaleido not installed)
 try:
     from generate_report import generate_pdf
@@ -114,76 +123,9 @@ WS_FILES = {
 }
 MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
 OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
-CONF_THRESHOLD  = 0.85  # below this, matching file entry is ignored unless overridden
+# CONF_THRESHOLD imported from src.metrics
 
-# ── Metric descriptions ───────────────────────────────────────────────────────
-METRIC_DESC = {
-    "Total dist p90":              "Total metres covered per 90 minutes. Measures overall work rate and engine.",
-    "HSR dist p90":                "High-speed running distance (above ~20km/h) per 90 mins.",
-    "Sprint dist p90":             "Distance covered at sprint pace (above ~25km/h) per 90 mins.",
-    "PSV99 avg":                   "Peak Sprint Velocity — average of the player's top speed across matches.",
-    "COD count p90":               "Changes of direction per 90 mins. Reflects agility and positional movement.",
-    "Goals p90":                   "Goals scored per 90 minutes played.",
-    "Assists p90":                 "Assists (final pass before a goal) per 90 minutes.",
-    "xG p90":                      "Expected goals per 90 mins.",
-    "xA p90":                      "Expected assists per 90 mins.",
-    "Shot asts p90":               "Passes that directly led to a shot, per 90 mins.",
-    "Touches in box":              "Times the player received the ball inside the opposition penalty area per 90 mins.",
-    "Dribbles p90":                "Dribble attempts per 90 mins.",
-    "Prog runs p90":               "Ball carries that advance the team significantly up the pitch, per 90 mins.",
-    "Passes p90":                  "Total pass attempts per 90 mins.",
-    "Long pass p90":               "Long pass attempts per 90 mins.",
-    "Crosses p90":                 "Cross attempts per 90 mins from wide areas.",
-    "Duels p90":                   "Total physical contests per 90 mins.",
-    "Aerial p90":                  "Aerial duels contested per 90 mins.",
-    "Def duels p90":               "Defensive duel attempts per 90 mins.",
-    "Interceptions":               "Times the player intercepts an opposition pass per 90 mins.",
-    "Recoveries p90":              "Times the player wins possession from a loose ball, per 90 mins.",
-    "Losses p90":                  "Times the player loses the ball per 90 mins. Lower is better.",
-    "Pass acc %":                  "Percentage of passes that reach a teammate.",
-    "Duel win %":                  "Percentage of all duels won.",
-    "Aerial win %":                "Percentage of aerial duels won.",
-    "Def duel win %":              "Percentage of defensive duels won.",
-    "Dribble success %":           "Percentage of dribble attempts completed successfully.",
-    "Pressures received p90":      "Times the player was pressed by an opponent per 90 mins.",
-    "Ball retention under press":  "Percentage of times the player kept the ball when under pressure.",
-    "Pass completion under press": "Pass accuracy when under immediate pressure.",
-    "Runs per match":              "Off-ball runs made per match.",
-    "Dangerous runs":              "Runs made into high-threat areas per match.",
-    "Runs targeted":               "Times teammates attempted to play the ball to the player's runs.",
-    "Runs received":               "Times the player actually received the ball after making a run.",
-}
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def p90(value, minutes):
-    if minutes == 0: return 0.0
-    return round((value / minutes) * 90, 2)
-
-def pct(num, denom):
-    if denom == 0: return None
-    return round((num / denom) * 100, 1)
-
-def percentile_rank(value, series, inverse=False):
-    clean = series.dropna()
-    if len(clean) == 0 or pd.isna(value) or value is None: return None
-    rank = scipy_stats.percentileofscore(clean, value, kind='rank')
-    return round(100 - rank if inverse else rank, 1)
-
-def pct_colour(pct_val):
-    if pct_val is None: return '#666'
-    if pct_val >= 80:   return '#4ade80'
-    if pct_val >= 55:   return '#86efac'
-    if pct_val >= 35:   return '#facc15'
-    return '#f87171'
-
-def ordinal(n):
-    n = int(n); s = str(n)
-    if s.endswith('11') or s.endswith('12') or s.endswith('13'): return f"{n}th"
-    if s.endswith('1'): return f"{n}st"
-    if s.endswith('2'): return f"{n}nd"
-    if s.endswith('3'): return f"{n}rd"
-    return f"{n}th"
-
+# ── UI helpers (app.py-only — not shared) ─────────────────────────────────────
 def metric_card(label, value, sub='', vcls='', pct_val=None, peer_n=None):
     pct_section = ''
     if pct_val is not None:
@@ -220,54 +162,6 @@ def base_layout(title='', height=320):
         hovermode='x unified', hoverlabel=dict(bgcolor='#1a1a1a', font_size=11),
     )
 
-# ── Match label helpers (H/A) ─────────────────────────────────────────────────
-def parse_wyscout_label(match_str, team_name):
-    """'Wycombe Wanderers - Wigan Athletic 2:0' → 'Wigan Athletic (H)'"""
-    try:
-        parts = str(match_str).split(' - ', 1)
-        if len(parts) != 2: return str(match_str)
-        home = parts[0].strip()
-        away_score = parts[1].strip()
-        tokens = away_score.rsplit(' ', 1)
-        away = tokens[0].strip() if len(tokens) == 2 and ':' in tokens[1] else away_score
-        is_home = (home == team_name)
-        opponent = away if is_home else home
-        return f"{opponent} ({'H' if is_home else 'A'})"
-    except Exception:
-        return str(match_str)
-
-def parse_physical_label(match_name, team_name):
-    """'Wycombe Wanderers v Stockport County FC' → 'Stockport (H)'"""
-    try:
-        parts = str(match_name).split(' v ', 1)
-        if len(parts) != 2: return str(match_name)
-        home, away = parts[0].strip(), parts[1].strip()
-        is_home = (home == team_name)
-        opponent = away if is_home else home
-        for sfx in [' FC', ' AFC', ' United', ' City', ' Town', ' County', ' Wanderers', ' Rovers', ' Athletic']:
-            opponent = opponent.replace(sfx, '')
-        return f"{opponent.strip()} ({'H' if is_home else 'A'})"
-    except Exception:
-        return str(match_name)
-
-# ── Rolling average ───────────────────────────────────────────────────────────
-def rolling_avg(series, window=5):
-    return pd.Series(series).rolling(window=window, min_periods=3).mean()
-
-# ── Minutes opacity helpers ───────────────────────────────────────────────────
-def mins_to_opacity(minutes_series, lo=0.3, hi=1.0, min_mins=20, max_mins=90):
-    clipped = pd.Series(minutes_series).clip(lower=min_mins, upper=max_mins)
-    normed  = (clipped - min_mins) / (max_mins - min_mins)
-    return (lo + normed * (hi - lo)).tolist()
-
-def rgba(hex_col, opacity):
-    h = hex_col.lstrip('#')
-    r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
-    return f"rgba({r},{g},{b},{opacity:.2f})"
-
-def colour_list(hex_col, opacities):
-    return [rgba(hex_col, o) for o in opacities]
-
 # ── Player file discovery ─────────────────────────────────────────────────────
 def get_player_list():
     """Scan data/players/ for master Excel files. No cache so new files appear immediately."""
@@ -302,29 +196,9 @@ def load_wyscout_league():
     return pd.concat(dfs, ignore_index=True) if dfs else None
 
 @st.cache_data
-def build_physical_season_averages(phys_csv):
-    """Aggregate physical CSV into per-player season averages for comparison."""
-    if phys_csv is None: return None
-    df = phys_csv[phys_csv['quality_check'] == True].copy()
-    agg = df.groupby(['player_name', 'team_name', 'competition_name']).agg(
-        mins         = ('minutes_played_per_match', 'sum'),
-        total_dist   = ('dist_per_match',            'sum'),
-        hsr_dist     = ('hsr_dist_per_match',         'sum'),
-        sprint_dist  = ('sprint_dist_per_match',      'sum'),
-        hsr_count    = ('count_hsr_per_match',         'sum'),
-        sprint_count = ('count_sprint_per_match',      'sum'),
-        hi_accel     = ('count_high_accel_per_match',  'sum'),
-        psv99        = ('top_speed_per_match',         'mean'),
-    ).reset_index()
-    agg = agg[agg['mins'] >= 450].copy()
-    agg['total_dist_p90']  = agg['total_dist']  / agg['mins'] * 90
-    agg['hsr_dist_p90']    = agg['hsr_dist']    / agg['mins'] * 90
-    agg['sprint_dist_p90'] = agg['sprint_dist'] / agg['mins'] * 90
-    agg['hsr_count_p90']   = agg['hsr_count']   / agg['mins'] * 90
-    agg['sprint_count_p90']= agg['sprint_count']/ agg['mins'] * 90
-    agg['hi_accel_p90']    = agg['hi_accel']    / agg['mins'] * 90
-    agg['psv99_avg']       = agg['psv99']
-    return agg
+def _cached_build_physical_season_averages(phys_csv):
+    """Cached wrapper around src.metrics.build_physical_season_averages."""
+    return build_physical_season_averages(phys_csv)
 
 
 @st.cache_data
@@ -399,74 +273,6 @@ def process_wyscout(df):
 def process_physical(df):
     return df[df['minutes_full_all'] >= 20].copy().sort_values('match_date').reset_index(drop=True)
 
-# ── Peer group builders ───────────────────────────────────────────────────────
-def build_physical_peers(phys_csv, position_group, min_mins, league_filter):
-    if phys_csv is None or not position_group: return {}, 0
-    df = phys_csv[phys_csv['quality_check'] == True].copy()
-    if league_filter == 'League One':
-        df = df[df['competition_name'].str.contains('League One', na=False)]
-    elif league_filter == 'League Two':
-        df = df[df['competition_name'].str.contains('League Two', na=False)]
-    df = df[df['group'] == position_group]
-    agg = df.groupby('player_name').agg(
-        mins         = ('minutes_played_per_match','sum'),
-        total_dist   = ('dist_per_match','sum'),
-        hsr_dist     = ('hsr_dist_per_match','sum'),
-        sprint_dist  = ('sprint_dist_per_match','sum'),
-        hsr_count    = ('count_hsr_per_match','sum'),
-        sprint_count = ('count_sprint_per_match','sum'),
-        hi_accel     = ('count_high_accel_per_match','sum'),
-        psv99        = ('top_speed_per_match','mean'),
-    ).reset_index()
-    agg = agg[agg['mins'] >= min_mins]
-    if len(agg) < 5: return {}, 0
-    def pp90(col):
-        return (agg[col] / agg['mins'] * 90).replace([np.inf,-np.inf], np.nan).dropna()
-    out = {
-        'total_dist_p90':  pp90('total_dist'),
-        'hsr_dist_p90':    pp90('hsr_dist'),
-        'sprint_dist_p90': pp90('sprint_dist'),
-        'hsr_count_p90':   pp90('hsr_count'),
-        'sprint_count_p90':pp90('sprint_count'),
-        'hi_accel_p90':    pp90('hi_accel'),
-        'psv99_avg':       agg['psv99'].dropna(),
-    }
-    return {k:v for k,v in out.items() if len(v)>=5}, len(agg)
-
-def build_wyscout_peers(pos_key, league_filter, min_mins):
-    """Build Wyscout peer series from position-specific file."""
-    df = load_wyscout_position_file(pos_key, league_filter)
-    if df is None: return {}, 0
-    df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins]
-    if len(df) < 5: return {}, 0
-    def ser(col):
-        s = pd.to_numeric(df[col], errors='coerce').dropna()
-        return s if len(s) >= 5 else None
-    out = {
-        'goals_p90':         ser('Goals per 90'),
-        'assists_p90':       ser('Assists per 90'),
-        'xg_p90':            ser('xG per 90'),
-        'xa_p90':            ser('xA per 90'),
-        'shot_asts_p90':     ser('Shot assists per 90'),
-        'touches_box_p90':   ser('Touches in box per 90'),
-        'dribbles_p90':      ser('Dribbles per 90'),
-        'drib_pct':          ser('Successful dribbles, %'),
-        'prog_runs_p90':     ser('Progressive runs per 90'),
-        'passes_p90':        ser('Passes per 90'),
-        'pass_acc':          ser('Accurate passes, %'),
-        'long_passes_p90':   ser('Long passes per 90'),
-        'crosses_p90':       ser('Crosses per 90'),
-        'duels_p90':         ser('Duels per 90'),
-        'duel_win':          ser('Duels won, %'),
-        'aerial_p90':        ser('Aerial duels per 90'),
-        'aerial_win':        ser('Aerial duels won, %'),
-        'def_duels_p90':     ser('Defensive duels per 90'),
-        'def_duel_win':      ser('Defensive duels won, %'),
-        'interceptions_p90': ser('Interceptions per 90'),
-        'recoveries_p90':    ser('Successful defensive actions per 90'),  # Wyscout composite: won def duels + interceptions + recoveries
-    }
-    return {k:v for k,v in out.items() if v is not None}, len(df)
-
 def get_named_ws_peers(pos_key, league_filter, min_mins):
     """Return the full peer DataFrame with Player+Team names (uses position-specific file)."""
     df = load_wyscout_position_file(pos_key, league_filter)
@@ -502,102 +308,6 @@ def get_named_phys_peers(phys_csv, position_group, min_mins, league_filter):
     agg['psv99_avg']       = agg['psv99']
     return agg
 
-
-# ── Season totals ─────────────────────────────────────────────────────────────
-def get_season_totals(ws):
-    mins = ws['Minutes played'].sum(); s = ws.sum(numeric_only=True)
-    return {
-        'mins':mins,'matches':len(ws),
-        'goals_raw':int(s['Goals']),'assists_raw':int(s['Assists']),
-        'yellow':int(ws.iloc[:,39].sum()),'red':int(ws.iloc[:,40].sum()),
-        'goals_p90':        p90(s['Goals'],mins),
-        'assists_p90':      p90(s['Assists'],mins),
-        'xg_p90':           p90(s['xG'],mins),
-        'xa_p90':           p90(s['xA'],mins),
-        'shots_p90':        p90(s['Shots'],mins),
-        'shot_asts_p90':    p90(ws['Shot assists'].sum(),mins),
-        'touches_box_p90':  p90(ws['Touches in penalty area'].sum(),mins),
-        'dribbles_p90':     p90(s['Dribbles'],mins),
-        'drib_pct':         pct(ws.iloc[:,19].sum(),s['Dribbles']),
-        'prog_runs_p90':    p90(ws['Progressive runs'].sum(),mins),
-        'ptf3_p90':         p90(ws['Passes to final third'].sum(),mins),
-        'passes_p90':       p90(s['Passes'],mins),
-        'pass_acc':         pct(ws.iloc[:,13].sum(),s['Passes']),
-        'long_passes_p90':  p90(s['Long passes'],mins),
-        'lp_acc':           pct(ws.iloc[:,15].sum(),s['Long passes']),
-        'crosses_p90':      p90(s['Crosses'],mins),
-        'duels_p90':        p90(s['Duels'],mins),
-        'duel_win':         pct(ws.iloc[:,21].sum(),s['Duels']),
-        'aerial_p90':       p90(s['Aerial duels'],mins),
-        'aerial_win':       pct(ws.iloc[:,23].sum(),s['Aerial duels']),
-        'def_duels_p90':    p90(ws.iloc[:,31].sum(),mins),
-        'def_duel_win':     pct(ws.iloc[:,32].sum(),ws.iloc[:,31].sum()),
-        'interceptions_p90':p90(s['Interceptions'],mins),
-        'recoveries_p90':   p90(s['Recoveries'],mins),  # raw recoveries from master — see note below
-        'rec_opp_p90':      p90(ws['opp. half'].sum(),mins),
-        'clearances_p90':   p90(s['Clearances'],mins),
-        'losses_p90':       p90(s['Losses'],mins),
-        'losses_oh_p90':    p90(ws['own half'].sum(),mins),
-        'fouls_p90':        p90(ws['Fouls'].sum(),mins),
-    }
-
-def get_physical_totals(ph):
-    mins = ph['minutes_full_all'].sum(); s = ph.sum(numeric_only=True)
-    return {
-        'total_dist_p90':  p90(s['total_distance_full_all'],mins),
-        'hsr_dist_p90':    p90(s['hsr_distance_full_all'],mins),
-        'hsr_count_p90':   p90(s['hsr_count_full_all'],mins),
-        'sprint_dist_p90': p90(s['sprint_distance_full_all'],mins),
-        'sprint_count_p90':p90(s['sprint_count_full_all'],mins),
-        'psv99_avg':       round(ph['psv99'].mean(),2),
-        'psv99_max':       round(ph['psv99'].max(),2),
-        'cod_p90':         p90(s['cod_count_full_all'],mins),
-        'hi_accel_p90':    p90(s['highaccel_count_full_all'],mins),
-    }
-
-def build_match_log(ws, team_name):
-    rows = []
-    def safe_int(v):
-        try: return int(v) if pd.notna(v) else 0
-        except: return 0
-    def safe_round(v, d=2):
-        try: return round(float(v), d) if pd.notna(v) else 0.0
-        except: return 0.0
-    def sp(n, d):
-        try: return f"{int(round(float(n)/float(d)*100))}%" if pd.notna(n) and pd.notna(d) and float(d)>0 else "-"
-        except: return "-"
-    for _, r in ws.iterrows():
-        rows.append({
-            'Match':   parse_wyscout_label(r['Match'], team_name),
-            'Date':    pd.to_datetime(r['Date']).strftime('%d %b') if pd.notna(r['Date']) else '',
-            'Pos':     str(r['Position']),
-            'Min':     safe_int(r['Minutes played']),
-            'G':       safe_int(r['Goals']),
-            'A':       safe_int(r['Assists']),
-            'xG':      safe_round(r['xG']),
-            'xA':      safe_round(r['xA']),
-            'ShAst':   safe_int(r['Shot assists']),
-            'TouBox':  safe_int(r['Touches in penalty area']),
-            'Drb':     safe_int(r['Dribbles']),
-            'Drb%':    sp(r.iloc[19], r['Dribbles']),
-            'Pass':    safe_int(r['Passes']),
-            'Pass%':   sp(r.iloc[13], r['Passes']),
-            'Cross':   safe_int(r['Crosses']),
-            'PTF3':    safe_int(r['Passes to final third']),
-            'Duels':   safe_int(r['Duels']),
-            'Duel%':   sp(r.iloc[21], r['Duels']),
-            'AerDuel': safe_int(r['Aerial duels']),
-            'Aer%':    sp(r.iloc[23], r['Aerial duels']),
-            'DefDuel': safe_int(r.iloc[31]),
-            'DefD%':   sp(r.iloc[32], r.iloc[31]),
-            'Int':     safe_int(r['Interceptions']),
-            'Rec':     safe_int(r['Recoveries']),
-            'Clr':     safe_int(r['Clearances']),
-            'Loss':    safe_int(r['Losses']),
-            'LossOH':  safe_int(r['own half']),
-            'Foul':    safe_int(r['Fouls']),
-        })
-    return pd.DataFrame(rows)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -657,7 +367,7 @@ with st.spinner(f"Loading {selected_name}..."):
     league_df    = load_wyscout_league()
     matching_df  = load_matching()
     overrides_df = load_overrides()
-    phys_avgs    = build_physical_season_averages(phys_csv)
+    phys_avgs    = _cached_build_physical_season_averages(phys_csv)
 
 ws_raw = sheets.get('Wyscout')
 ph_raw = sheets.get('Physical')
@@ -727,7 +437,7 @@ if ws_pos_key and short_name:
 
 # ── Peer groups ───────────────────────────────────────────────────────────────
 phys_peers, phys_peer_n = build_physical_peers(phys_csv, position_group, min_mins_peer, peer_league)
-ws_peers,   ws_peer_n   = build_wyscout_peers(ws_pos_key, peer_league, min_mins_peer) if ws_pos_key else ({}, 0)
+ws_peers,   ws_peer_n   = build_wyscout_peers(ws_pos_key, peer_league, min_mins_peer, WS_FILES) if ws_pos_key else ({}, 0)
 # Named peer dataframes for ranking charts
 ws_peers_named   = get_named_ws_peers(ws_pos_key, peer_league, min_mins_peer) if ws_pos_key else None
 phys_peers_named = get_named_phys_peers(phys_csv, position_group, min_mins_peer, peer_league)
