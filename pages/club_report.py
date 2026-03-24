@@ -754,6 +754,26 @@ if _matched_name and ws_pos_key:
                 )
             _squad_context += "\n" + "\n".join(_pos_gap_lines)
 
+# ── Comparable players (computed early so gap expander can reference them) ────
+_comparables_df = pd.DataFrame()
+_comparables_context = ""
+
+if ws_pos_key and season_combined:
+    try:
+        _comparables_df = find_comparable_players(
+            client_totals=season_combined,
+            pos_key=ws_pos_key,
+            league_filter=peer_leagues,
+            min_mins=min_mins_peer,
+            ws_files=WS_FILES,
+            top_n=8,
+            client_name=selected_name,
+            client_phys=phys,
+            phys_season_avgs=_cached_phys_avgs(phys_csv),
+        )
+    except Exception as _ce:
+        st.warning(f"Could not compute comparable players: {_ce}")
+
 # ── What they need + extra context ────────────────────────────────────────────
 col_need, col_extra = st.columns(2)
 with col_need:
@@ -790,14 +810,28 @@ if _squad_df is not None and not _squad_df.empty:
     )
     st.caption(f"{len(_squad_df)} player(s) from {_matched_name} at {ws_pos_key} · {min_mins_peer}+ mins")
 
+    # Mapping: squad gap label → comparable display column name (from _COMPARABLE_DISPLAY_COLS)
+    _GAP_TO_COMP_COL = {
+        'Passes per 90':           'Pass p90',
+        'Accurate passes, %':      'Pass%',
+        'Duels won, %':            'Duel%',
+        'Aerial duels per 90':     'Aerial p90',
+        'Aerial duels won, %':     'Aerial%',
+        'Interceptions per 90':    'Int p90',
+        'Goals per 90':            'Goals p90',
+        'Defensive duels won, %':  'Def%',
+        'xG per 90':               'xG p90',
+        'Crosses per 90':          'Cross p90',
+    }
+
     # Position-level gap expander — data computed in squad data section above
     if _pos_gaps:
         with st.expander(f"Position-level gaps — {_matched_name} {ws_pos_key}s vs league median", expanded=False):
             # Header
-            _gcols = st.columns([3, 1, 1, 1, 2])
+            _gcols = st.columns([3, 1, 1, 1, 2, 2])
             for _hdr, _col in zip(
                 ["**Metric**", "**Squad avg**", "**Peer median**",
-                 f"**{selected_name.split()[0]}**", "**Verdict**"],
+                 f"**{selected_name.split()[0]}**", "**Verdict**", "**Best match**"],
                 _gcols,
             ):
                 _col.markdown(_hdr)
@@ -805,7 +839,7 @@ if _squad_df is not None and not _squad_df.empty:
             for _g in _pos_gaps[:6]:
                 _peer_key   = _SQUAD_COL_TO_PEER.get(_g["label"])
                 _client_val = season_combined.get(_peer_key) if _peer_key else None
-                _gcols = st.columns([3, 1, 1, 1, 2])
+                _gcols = st.columns([3, 1, 1, 1, 2, 2])
                 _gcols[0].write(_g["label"])
                 _gcols[1].write(f"{_g['squad_avg']:.1f}")
                 _gcols[2].write(f"{_g['peer_med']:.1f}")
@@ -832,26 +866,22 @@ if _squad_df is not None and not _squad_df.empty:
                     _gcols[3].write("–")
                     _gcols[4].write("–")
 
-# ── Most comparable players ─────────────────────────────────────────────────────
-_comparables_df = pd.DataFrame()
-_comparables_context = ""
+                # Best match — most similar comparable who exceeds peer median on this metric
+                _comp_col = _GAP_TO_COMP_COL.get(_g["label"])
+                _best_match = "–"
+                if _comp_col and not _comparables_df.empty and _comp_col in _comparables_df.columns:
+                    _exceeds = _comparables_df[
+                        pd.to_numeric(_comparables_df[_comp_col], errors='coerce') >= _g["peer_med"]
+                    ]
+                    if not _exceeds.empty:
+                        _best_row = _exceeds.iloc[0]  # already sorted by similarity desc
+                        _best_match = (
+                            f"{_best_row['Player'].split()[-1]} "
+                            f"({_best_row.get('League','?')[:2]})"
+                        )
+                _gcols[5].write(_best_match)
 
-if ws_pos_key and season_combined:
-    try:
-        _comparables_df = find_comparable_players(
-            client_totals=season_combined,
-            pos_key=ws_pos_key,
-            league_filter=peer_leagues,
-            min_mins=min_mins_peer,
-            ws_files=WS_FILES,
-            top_n=8,
-            client_name=selected_name,
-            client_phys=phys,
-            phys_season_avgs=_cached_phys_avgs(phys_csv),
-        )
-    except Exception as _ce:
-        st.warning(f"Could not compute comparable players: {_ce}")
-
+# ── Most comparable players display ─────────────────────────────────────────────
 if not _comparables_df.empty:
     st.markdown('<div class="section-header">Most comparable players — by statistical profile</div>', unsafe_allow_html=True)
     st.caption(
@@ -872,13 +902,22 @@ if not _comparables_df.empty:
         else:
             return "background-color: #1e3a5f; color: #93c5fd"
 
+    # Count physical blend coverage before hiding the helper column
+    _phys_blend_count = int(_comparables_df["_phys_matched"].sum()) if "_phys_matched" in _comparables_df.columns else 0
+    _comparables_display = _comparables_df.drop(columns=["_phys_matched"], errors="ignore")
+
     st.dataframe(
-        _comparables_df.style
+        _comparables_display.style
             .format(precision=1, na_rep="–")
             .applymap(_sim_colour, subset=["Similarity"]),
         use_container_width=True,
         hide_index=True,
     )
+    if _phys_blend_count > 0:
+        st.caption(
+            f"Physical data blended for {_phys_blend_count}/{len(_comparables_df)} "
+            f"comparable players (total dist, HSR, sprint dist, PSV99)."
+        )
 
     # Build plain-text context for prompts
     _comp_lines = []

@@ -750,13 +750,16 @@ _POSITION_WEIGHTS: Dict[str, Dict[str, float]] = {
 
 # Columns shown in the output table (peer file names → display label)
 _COMPARABLE_DISPLAY_COLS: Dict[str, str] = {
-    'Passes per 90':         'Pass p90',
-    'Accurate passes, %':    'Pass%',
-    'Duels won, %':          'Duel%',
-    'Aerial duels per 90':   'Aerial p90',
-    'Aerial duels won, %':   'Aerial%',
-    'Interceptions per 90':  'Int p90',
-    'Goals per 90':          'Goals p90',
+    'Passes per 90':           'Pass p90',
+    'Accurate passes, %':      'Pass%',
+    'Duels won, %':            'Duel%',
+    'Aerial duels per 90':     'Aerial p90',
+    'Aerial duels won, %':     'Aerial%',
+    'Interceptions per 90':    'Int p90',
+    'Goals per 90':            'Goals p90',
+    'Defensive duels won, %':  'Def%',
+    'xG per 90':               'xG p90',
+    'Crosses per 90':          'Cross p90',
 }
 
 
@@ -793,8 +796,9 @@ def _apply_physical_blend(
 
     Returns
     -------
-    np.ndarray
-        Final blended distances, same shape as ws_distances.
+    tuple[np.ndarray, list[bool]]
+        Final blended distances (same shape as ws_distances) and a parallel
+        list of booleans indicating which peers were matched to physical data.
     """
     from difflib import get_close_matches, SequenceMatcher
 
@@ -806,7 +810,7 @@ def _apply_physical_blend(
         and not pd.isna(client_phys.get(f, np.nan))
     ]
     if len(avail_feats) < 2:
-        return ws_distances   # client lacks physical data — skip blend
+        return ws_distances, [False] * len(ws_distances)  # client lacks physical data — skip blend
 
     client_arr = np.array([client_phys[f] for f in avail_feats], dtype=float)
 
@@ -821,6 +825,7 @@ def _apply_physical_blend(
 
     # Compute physical distance for each peer
     peer_phys_dists: list = []
+    peer_matched:    list = []   # True when we found a physical record for this peer
     for peer_name in peer_names:
         try:
             name_low = str(peer_name).lower()
@@ -841,18 +846,22 @@ def _apply_physical_blend(
 
             if matched is None:
                 peer_phys_dists.append(None)
+                peer_matched.append(False)
                 continue
 
             row      = phys_season_avgs.loc[phys_season_avgs["player_name"] == matched].iloc[0]
             peer_arr = np.array([row.get(f, np.nan) for f in avail_feats], dtype=float)
             if np.any(np.isnan(peer_arr)):
                 peer_phys_dists.append(None)
+                peer_matched.append(False)
             else:
                 peer_n   = (peer_arr - p_means) / p_stds
                 peer_phys_dists.append(float(np.sqrt(np.sum((peer_n - client_n) ** 2))))
+                peer_matched.append(True)
 
         except Exception:
             peer_phys_dists.append(None)
+            peer_matched.append(False)
 
     # Normalise both WS and physical distances to [0, 1] before blending
     ws_max = float(ws_distances.max()) if ws_distances.max() > 0 else 1.0
@@ -869,7 +878,7 @@ def _apply_physical_blend(
         else:
             final[i] = ws_n   # no physical data → Wyscout only, no penalty
 
-    return final
+    return final, peer_matched
 
 
 def find_comparable_players(
@@ -1001,8 +1010,9 @@ def find_comparable_players(
     # Optionally blends a physical distance (total dist, HSR, sprint, PSV99) at
     # the position-specific weight.  Falls back to Wyscout-only if data is absent.
     phys_blend = _PHYS_BLEND.get(pos_key, 0.20) if (client_phys and phys_season_avgs is not None) else 0.0
+    phys_matched_flags: list = [False] * len(distances)
     if phys_blend > 0:
-        final_distances = _apply_physical_blend(
+        final_distances, phys_matched_flags = _apply_physical_blend(
             ws_distances=distances,
             peer_names=df["Player"].tolist(),
             client_phys=client_phys,
@@ -1013,8 +1023,9 @@ def find_comparable_players(
         final_distances = distances
 
     df = df.copy()
-    df['_dist']    = final_distances
-    df['_mins']    = pd.to_numeric(df['Minutes played'], errors='coerce')
+    df['_dist']         = final_distances
+    df['_phys_matched'] = phys_matched_flags
+    df['_mins']         = pd.to_numeric(df['Minutes played'], errors='coerce')
     df = df.dropna(subset=['_dist']).sort_values('_dist')
 
     max_d = df['_dist'].max()
@@ -1022,11 +1033,11 @@ def find_comparable_players(
 
     # Build output table
     display_cols = {c: lbl for c, lbl in _COMPARABLE_DISPLAY_COLS.items() if c in df.columns}
-    keep = ['Player', 'Team', '_league', '_mins', 'Similarity'] + list(display_cols.keys())
+    keep = ['Player', 'Team', '_league', '_mins', 'Similarity', '_phys_matched'] + list(display_cols.keys())
     keep = [c for c in keep if c in df.columns]
 
     result = df[keep].head(top_n).copy()
-    result = result.rename(columns={'_league': 'League', '_mins': 'Minutes'})
+    result = result.rename(columns={'_league': 'League', '_mins': 'Minutes', '_phys_matched': '_phys_matched'})
     result = result.rename(columns=display_cols)
     result['Minutes'] = result['Minutes'].astype(int)
 
