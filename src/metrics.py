@@ -424,12 +424,20 @@ def build_physical_peers(
 
     df = phys_csv[phys_csv['quality_check'] == True].copy()
 
-    if league_filter == 'Championship':
-        df = df[df['competition_name'].str.contains('Championship', na=False)]
-    elif league_filter == 'League One':
-        df = df[df['competition_name'].str.contains('League One', na=False)]
-    elif league_filter == 'League Two':
-        df = df[df['competition_name'].str.contains('League Two', na=False)]
+    if isinstance(league_filter, list):
+        _selected = league_filter
+    elif league_filter == 'Both':
+        _selected = ['League One', 'League Two']
+    elif league_filter == 'All':
+        _selected = ['Championship', 'League One', 'League Two']
+    elif league_filter in ('Championship', 'League One', 'League Two'):
+        _selected = [league_filter]
+    else:
+        _selected = []
+
+    if _selected:
+        _pattern = '|'.join(_selected)
+        df = df[df['competition_name'].str.contains(_pattern, na=False)]
 
     df = df[df['group'] == position_group]
 
@@ -493,8 +501,14 @@ def build_wyscout_peers(
     if not pos_key:
         return {}, 0
 
-    leagues = ['League One', 'League Two'] if league_filter == 'Both' else [league_filter]
-    # 'Both' covers L1/L2 only — Championship included when explicitly selected
+    if isinstance(league_filter, list):
+        leagues = league_filter
+    elif league_filter == 'Both':
+        leagues = ['League One', 'League Two']
+    elif league_filter == 'All':
+        leagues = ['Championship', 'League One', 'League Two']
+    else:
+        leagues = [league_filter]
     dfs = []
     for league in leagues:
         path = ws_files.get(league, {}).get(pos_key)

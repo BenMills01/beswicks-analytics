@@ -16,6 +16,7 @@ import difflib
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 CLUBS_DIR = "data/clubs"
@@ -153,6 +154,19 @@ def get_club_profile(club_name: str, filepath: str) -> dict:
         else:
             play_style = "Balanced"
 
+    # ── League ────────────────────────────────────────────────────────────────
+    league = None
+    if "Competition" in club_df.columns:
+        comp_val = club_df["Competition"].dropna().mode()
+        if not comp_val.empty:
+            c = comp_val.iloc[0].lower()
+            if "championship" in c:
+                league = "Championship"
+            elif "league one" in c:
+                league = "League One"
+            elif "league two" in c:
+                league = "League Two"
+
     return {
         "club_name":             club_name,
         "matches":               n,
@@ -170,6 +184,7 @@ def get_club_profile(club_name: str, filepath: str) -> dict:
         "avg_goals_conceded":    avg_goals_conceded,
         "press_intensity":       press_intensity,
         "play_style":            play_style,
+        "league":                league,
     }
 
 
@@ -255,3 +270,298 @@ def format_club_context(profile: dict) -> str:
         parts.append(f"W{w}/D{d}/L{l} ({n} games)")
 
     return " · ".join(parts)
+
+
+# ── League-wide analysis ───────────────────────────────────────────────────────
+
+def get_all_club_profiles() -> dict[str, dict]:
+    """
+    Load profiles for every club file in CLUBS_DIR.
+    Returns {club_name: profile_dict}. Silently skips files that fail to load.
+    Intended to be wrapped with @st.cache_data in the calling page.
+    """
+    profiles: dict[str, dict] = {}
+    for club_name, filepath in get_club_list().items():
+        try:
+            profiles[club_name] = get_club_profile(club_name, filepath)
+        except Exception:
+            pass
+    return profiles
+
+
+def get_league_medians(all_profiles: dict[str, dict]) -> dict[str, float]:
+    """
+    Compute median values for each numeric club metric across all available
+    club profiles. Used as the baseline for weakness diagnosis.
+
+    Returns {metric_key: median_value}.
+    """
+    metrics = [
+        "avg_possession", "avg_ppda", "avg_pass_acc_pct", "avg_long_pass_pct",
+        "avg_def_duel_win_pct", "avg_aerial_win_pct",
+        "avg_goals_scored", "avg_goals_conceded",
+    ]
+    medians: dict[str, float] = {}
+    for m in metrics:
+        values = [p[m] for p in all_profiles.values() if p.get(m) is not None]
+        if values:
+            medians[m] = round(float(np.median(values)), 2)
+    return medians
+
+
+def get_club_weaknesses(
+    club_profile: dict,
+    medians: dict[str, float],
+) -> list[dict]:
+    """
+    Identify areas where the club falls below the league median.
+
+    Returns a list of weakness dicts sorted by severity (largest gap first):
+        {metric, label, club_val, median_val, gap_pct, interpretation}
+
+    Only metrics where the club is on the wrong side of the median are included.
+    """
+    # (metric_key, display_label, inverse, interpretation)
+    # inverse=True means higher value is worse (e.g. goals_conceded)
+    checks = [
+        ("avg_def_duel_win_pct", "Defensive duel win %", False,
+         "Struggle to win defensive 1v1 battles — need a dominant ball-winner"),
+        ("avg_aerial_win_pct",   "Aerial duel win %",    False,
+         "Losing aerial battles — concede from set pieces and long balls"),
+        ("avg_goals_conceded",   "Goals conceded/game",  True,
+         "Conceding at an above-average rate — defensive solidity required"),
+        ("avg_possession",       "Possession %",         False,
+         "Below-average ball retention — need a composed, ball-playing profile"),
+        ("avg_pass_acc_pct",     "Pass accuracy %",      False,
+         "Higher turnover rate in possession — need a reliable passer"),
+        ("avg_goals_scored",     "Goals scored/game",    False,
+         "Below-average attacking output — need more end-product"),
+    ]
+
+    weaknesses: list[dict] = []
+    for key, label, inverse, interpretation in checks:
+        club_val   = club_profile.get(key)
+        median_val = medians.get(key)
+        if club_val is None or median_val is None or median_val == 0:
+            continue
+        if inverse:
+            is_weak = club_val > median_val
+            gap_pct = round((club_val - median_val) / median_val * 100, 1)
+        else:
+            is_weak = club_val < median_val
+            gap_pct = round((median_val - club_val) / median_val * 100, 1)
+        if is_weak:
+            weaknesses.append({
+                "metric":         key,
+                "label":          label,
+                "club_val":       club_val,
+                "median_val":     median_val,
+                "gap_pct":        gap_pct,
+                "interpretation": interpretation,
+                "inverse":        inverse,
+            })
+
+    return sorted(weaknesses, key=lambda x: x["gap_pct"], reverse=True)
+
+
+def suggest_club_need(
+    weaknesses: list[dict],
+    club_profile: dict,
+) -> str:
+    """
+    Generate a plain-English 'what they need' suggestion from weakness data
+    and club tactical profile. Returns an editable pre-fill string.
+    """
+    parts: list[str] = []
+
+    for w in weaknesses[:3]:
+        m = w["metric"]
+        if "def_duel" in m:
+            parts.append("dominant 1v1 defender")
+        elif "aerial" in m:
+            parts.append("aerial presence and strength in the air")
+        elif "goals_conceded" in m:
+            parts.append("defensive solidity and organisation")
+        elif "possession" in m:
+            parts.append("composed ball-carrier under pressure")
+        elif "pass_acc" in m:
+            parts.append("reliable passer who retains possession")
+        elif "goals_scored" in m:
+            parts.append("goal threat and attacking output")
+
+    press = club_profile.get("press_intensity", "")
+    if press == "High press":
+        parts.append("high work rate and press triggers")
+    elif press == "Low block":
+        parts.append("defensive discipline and positional awareness")
+
+    style = club_profile.get("play_style", "")
+    if style == "Direct":
+        parts.append("can hold up play and compete for long balls")
+    elif style == "Possession-based":
+        parts.append("comfortable on the ball in tight spaces")
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+
+    return ", ".join(unique)
+
+
+# ── Squad comparison ──────────────────────────────────────────────────────────
+
+# Columns to display in squad comparison — named as they appear in Wyscout
+# position files. Subset chosen to work across all positions.
+_SQUAD_DISPLAY_COLS = [
+    ("Player",                  "Player"),
+    ("Minutes played",          "Mins"),
+    ("Passes per 90",           "Pass p90"),
+    ("Accurate passes, %",      "Pass%"),
+    ("Duels per 90",            "Duels p90"),
+    ("Duels won, %",            "Duel%"),
+    ("Aerial duels per 90",     "Aerial p90"),
+    ("Aerial duels won, %",     "Aerial%"),
+    ("Defensive duels per 90",  "Def duel p90"),
+    ("Defensive duels won, %",  "Def%"),
+    ("Interceptions per 90",    "Int p90"),
+]
+
+
+def get_club_squad_at_position(
+    club_name: str,
+    pos_key: str,
+    ws_files: dict[str, dict[str, str]],
+    min_mins: int = 450,
+) -> pd.DataFrame | None:
+    """
+    Find the target club's players at the given position in Wyscout league files.
+
+    Tries Championship, League One, League Two in order. Returns a filtered
+    DataFrame of the club's players at that position with display columns,
+    or None if the club is not found in any file.
+
+    Parameters
+    ----------
+    club_name : str
+        Club name as it appears in the Wyscout position file's 'Team' column.
+    pos_key : str
+        Position key (e.g. 'Central Defender') matching the WS_FILES dict.
+    ws_files : dict
+        The WS_FILES dict from app.py / pages.
+    min_mins : int
+        Minimum minutes to include a player in the squad view.
+    """
+    for league in ["Championship", "League One", "League Two"]:
+        path = ws_files.get(league, {}).get(pos_key)
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            df = pd.read_excel(path)
+        except Exception:
+            continue
+        if "Team" not in df.columns or "Minutes played" not in df.columns:
+            continue
+        mask = df["Team"].str.strip().str.lower() == club_name.strip().lower()
+        squad = df[mask & (df["Minutes played"] >= min_mins)].copy()
+        if not squad.empty:
+            # Keep only available display columns
+            keep = [src for src, _ in _SQUAD_DISPLAY_COLS if src in squad.columns]
+            return squad[keep].reset_index(drop=True)
+    return None
+
+
+# ── Style fit score ───────────────────────────────────────────────────────────
+
+def get_style_fit_score(
+    season: dict,
+    phys: Optional[dict],
+    club_profile: dict,
+    ws_peers: dict,
+    phys_peers: dict,
+    league_medians: dict,
+) -> dict:
+    """
+    Compute a 0-100 style fit score between a player and a club across four
+    dimensions. Returns a dict with keys:
+        overall, press_fit, buildup_fit, gap_fill, physical_fit
+    Any dimension lacking sufficient data returns None for that key.
+
+    Scoring logic:
+    - press_fit:   player's defensive intensity vs club's pressing demand
+    - buildup_fit: player's passing profile vs club's build-up style
+    - gap_fill:    how directly the player addresses the club's statistical weaknesses
+    - physical_fit: player's physical output vs peers (proxy for club fit)
+    """
+    from src.metrics import percentile_rank  # avoid circular at module level
+
+    def pr(key: str, val=None, peers: Optional[dict] = None) -> Optional[float]:
+        p = peers if peers is not None else ws_peers
+        v = val if val is not None else season.get(key)
+        if not p or key not in p or v is None:
+            return None
+        return percentile_rank(v, p[key])
+
+    scores: dict[str, Optional[float]] = {}
+
+    # ── 1. Press fit ──────────────────────────────────────────────────────────
+    ppda = club_profile.get("avg_ppda")
+    if ppda is not None and ws_peers:
+        if ppda < 8:   # High press — needs energy, recoveries, pressing triggers
+            pcts = [pr("interceptions_p90"), pr("recoveries_p90")]
+        elif ppda < 12:  # Moderate
+            pcts = [pr("def_duel_win"), pr("interceptions_p90")]
+        else:            # Low block — needs positional defensive solidity
+            pcts = [pr("def_duel_win"), pr("def_duels_p90")]
+        valid = [p for p in pcts if p is not None]
+        scores["press_fit"] = round(sum(valid) / len(valid)) if valid else None
+
+    # ── 2. Build-up fit ───────────────────────────────────────────────────────
+    possession = club_profile.get("avg_possession")
+    long_pass  = club_profile.get("avg_long_pass_pct")
+    if possession is not None and ws_peers:
+        if possession > 55:             # Possession-based — passing quality critical
+            pcts = [pr("pass_acc"), pr("passes_p90")]
+        elif long_pass and long_pass > 35:  # Direct — aerial & long ball ability
+            pcts = [pr("long_passes_p90"), pr("aerial_p90")]
+        else:                           # Balanced
+            pcts = [pr("pass_acc"), pr("prog_runs_p90")]
+        valid = [p for p in pcts if p is not None]
+        scores["buildup_fit"] = round(sum(valid) / len(valid)) if valid else None
+
+    # ── 3. Gap fill ───────────────────────────────────────────────────────────
+    # How well does the player address this club's specific statistical weaknesses?
+    gap_pcts: list[float] = []
+    club_def    = club_profile.get("avg_def_duel_win_pct", 100)
+    club_aerial = club_profile.get("avg_aerial_win_pct", 100)
+    club_conc   = club_profile.get("avg_goals_conceded", 0)
+    med_def     = league_medians.get("avg_def_duel_win_pct", 50)
+    med_aerial  = league_medians.get("avg_aerial_win_pct", 50)
+    med_conc    = league_medians.get("avg_goals_conceded", 1.5)
+
+    if club_def < med_def and ws_peers:
+        p = pr("def_duel_win")
+        if p is not None: gap_pcts.append(p)
+    if club_aerial < med_aerial and ws_peers:
+        p = pr("aerial_win")
+        if p is not None: gap_pcts.append(p)
+    if club_conc > med_conc and ws_peers:
+        p = pr("def_duels_p90")
+        if p is not None: gap_pcts.append(p)
+    scores["gap_fill"] = round(sum(gap_pcts) / len(gap_pcts)) if gap_pcts else None
+
+    # ── 4. Physical fit ───────────────────────────────────────────────────────
+    if phys and phys_peers:
+        phys_pcts = [pr(k, phys.get(k), phys_peers)
+                     for k in ("total_dist_p90", "hsr_dist_p90")]
+        valid = [p for p in phys_pcts if p is not None]
+        scores["physical_fit"] = round(sum(valid) / len(valid)) if valid else None
+
+    # ── Overall ───────────────────────────────────────────────────────────────
+    valid_scores = [v for v in scores.values() if v is not None]
+    scores["overall"] = round(sum(valid_scores) / len(valid_scores)) if valid_scores else None
+
+    return scores

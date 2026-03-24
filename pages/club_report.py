@@ -431,7 +431,14 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Peer group filters")
     min_mins_peer = st.slider("Min minutes", 450, 1800, 900, 90)
-    peer_league   = st.radio("League", ["Both", "Championship", "League One", "League Two"], horizontal=True)
+    peer_leagues  = st.multiselect(
+        "Leagues",
+        ["Championship", "League One", "League Two"],
+        default=["Championship", "League One", "League Two"],
+    )
+    if not peer_leagues:
+        peer_leagues = ["Championship", "League One", "League Two"]
+    peer_league = peer_leagues  # list — peer builders accept list or str
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 with st.spinner(f"Loading {selected_name}..."):
@@ -491,6 +498,7 @@ for _cn, _cp in _all_profiles_rank.items():
         if _fs.get("overall") is not None:
             _club_scores.append({
                 "Club":      _cn,
+                "League":    _cp.get("league", ""),
                 "Formation": _cp.get("primary_formation", ""),
                 "Style":     " · ".join(filter(None, [_cp.get("press_intensity"), _cp.get("play_style")])),
                 "Overall":   _fs["overall"],
@@ -502,6 +510,12 @@ for _cn, _cp in _all_profiles_rank.items():
     except Exception:
         pass
 
+# Filter to clubs whose league matches the selected peer leagues
+_club_scores = [
+    s for s in _club_scores
+    if _all_profiles_rank.get(s["Club"], {}).get("league") in peer_leagues
+    or _all_profiles_rank.get(s["Club"], {}).get("league") is None  # keep if league unknown
+]
 _club_scores.sort(key=lambda x: x["Overall"], reverse=True)
 
 if _club_scores:
@@ -517,7 +531,8 @@ if _club_scores:
         use_container_width=True,
         hide_index=True,
     )
-    st.caption(f"Scored across {len(_club_scores)} clubs · peer filter: {peer_league} · {min_mins_peer}+ mins")
+    _league_label = " + ".join(peer_leagues)
+    st.caption(f"Scored across {len(_club_scores)} clubs · peer filter: {_league_label} · {min_mins_peer}+ mins")
 
     # Quick-select: clicking a club from the top-10 pre-fills the target input
     if "target_club_input" not in st.session_state:
@@ -876,7 +891,7 @@ if (st.session_state.narrative and
                         radar_data=radar_data,
                         ws_peers=ws_peers, phys_peers=phys_peers,
                         ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
-                        peer_desc=f"{peer_league} · {min_mins_peer}+ mins",
+                        peer_desc=f"{' + '.join(peer_leagues)} · {min_mins_peer}+ mins",
                         audience='club',
                         narrative_text=st.session_state.narrative,
                         club_name=target_club,
