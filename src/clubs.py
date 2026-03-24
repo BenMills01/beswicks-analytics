@@ -532,14 +532,22 @@ def get_style_fit_score(
     """
     Compute a 0-100 style fit score between a player and a club across four
     dimensions. Returns a dict with keys:
-        overall, press_fit, buildup_fit, gap_fill, physical_fit
-    Any dimension lacking sufficient data returns None for that key.
+        overall, out_of_possession, in_possession, gap_fill, physical_fit
 
-    Scoring logic:
-    - press_fit:   player's defensive intensity vs club's pressing demand
-    - buildup_fit: player's passing profile vs club's build-up style
-    - gap_fill:    how directly the player addresses the club's statistical weaknesses
-    - physical_fit: player's physical output vs peers (proxy for club fit)
+    Dimensions:
+    - out_of_possession: defensive output scaled to the club's pressing intensity
+    - in_possession:     on-ball quality scaled to the club's play style
+    - gap_fill:          how directly the player addresses the club's weaknesses
+    - physical_fit:      physical output percentile vs position peers
+
+    Overall is a weighted average — weights reflect what the club's style
+    actually demands rather than a flat average across all four dimensions.
+
+    Weight logic (base 25% each, adjusted by pressing + play style):
+      High press   → out_of_possession +15%, others -5% each
+      Low block    → out_of_possession -10%, physical +15%, gap_fill +5%, in_possession -10%
+      Possession   → in_possession +15%, others -5% each
+      Direct       → physical +10%, in_possession -10%
     """
     from src.metrics import percentile_rank  # avoid circular at module level
 
@@ -551,34 +559,35 @@ def get_style_fit_score(
         return percentile_rank(v, p[key])
 
     scores: dict[str, Optional[float]] = {}
-
-    # ── 1. Press fit ──────────────────────────────────────────────────────────
-    ppda = club_profile.get("avg_ppda")
-    if ppda is not None and ws_peers:
-        if ppda < 8:   # High press — needs energy, recoveries, pressing triggers
-            pcts = [pr("interceptions_p90"), pr("recoveries_p90")]
-        elif ppda < 12:  # Moderate
-            pcts = [pr("def_duel_win"), pr("interceptions_p90")]
-        else:            # Low block — needs positional defensive solidity
-            pcts = [pr("def_duel_win"), pr("def_duels_p90")]
-        valid = [p for p in pcts if p is not None]
-        scores["press_fit"] = round(sum(valid) / len(valid)) if valid else None
-
-    # ── 2. Build-up fit ───────────────────────────────────────────────────────
+    ppda      = club_profile.get("avg_ppda")
     possession = club_profile.get("avg_possession")
     long_pass  = club_profile.get("avg_long_pass_pct")
-    if possession is not None and ws_peers:
-        if possession > 55:             # Possession-based — passing quality critical
-            pcts = [pr("pass_acc"), pr("passes_p90")]
-        elif long_pass and long_pass > 35:  # Direct — aerial & long ball ability
-            pcts = [pr("long_passes_p90"), pr("aerial_p90")]
-        else:                           # Balanced
-            pcts = [pr("pass_acc"), pr("prog_runs_p90")]
+
+    # ── 1. Out of possession ──────────────────────────────────────────────────
+    # Metrics selected by how the club defends — pressing, moderate, or low block
+    if ppda is not None and ws_peers:
+        if ppda < 8:     # High press — energy, winning ball high up the pitch
+            pcts = [pr("interceptions_p90"), pr("recoveries_p90"), pr("def_duel_win")]
+        elif ppda < 12:  # Moderate — blend of defensive duels and interceptions
+            pcts = [pr("def_duel_win"), pr("interceptions_p90"), pr("def_duels_p90")]
+        else:            # Low block — positional solidity, winning 1v1s in own half
+            pcts = [pr("def_duel_win"), pr("def_duels_p90"), pr("aerial_win")]
         valid = [p for p in pcts if p is not None]
-        scores["buildup_fit"] = round(sum(valid) / len(valid)) if valid else None
+        scores["out_of_possession"] = round(sum(valid) / len(valid)) if valid else None
+
+    # ── 2. In possession ─────────────────────────────────────────────────────
+    # Metrics selected by how the club uses the ball
+    if possession is not None and ws_peers:
+        if possession > 55:                      # Possession-based — quality and volume
+            pcts = [pr("pass_acc"), pr("passes_p90"), pr("prog_runs_p90")]
+        elif long_pass and long_pass > 35:       # Direct — long ball, aerial retention
+            pcts = [pr("long_passes_p90"), pr("aerial_p90"), pr("duel_win")]
+        else:                                    # Balanced — accuracy + forward threat
+            pcts = [pr("pass_acc"), pr("prog_runs_p90"), pr("dribbles_p90")]
+        valid = [p for p in pcts if p is not None]
+        scores["in_possession"] = round(sum(valid) / len(valid)) if valid else None
 
     # ── 3. Gap fill ───────────────────────────────────────────────────────────
-    # How well does the player address this club's specific statistical weaknesses?
     gap_pcts: list[float] = []
     club_def    = club_profile.get("avg_def_duel_win_pct", 100)
     club_aerial = club_profile.get("avg_aerial_win_pct", 100)
@@ -601,12 +610,49 @@ def get_style_fit_score(
     # ── 4. Physical fit ───────────────────────────────────────────────────────
     if phys and phys_peers:
         phys_pcts = [pr(k, phys.get(k), phys_peers)
-                     for k in ("total_dist_p90", "hsr_dist_p90")]
+                     for k in ("total_dist_p90", "hsr_dist_p90", "sprint_dist_p90")]
         valid = [p for p in phys_pcts if p is not None]
         scores["physical_fit"] = round(sum(valid) / len(valid)) if valid else None
 
-    # ── Overall ───────────────────────────────────────────────────────────────
-    valid_scores = [v for v in scores.values() if v is not None]
-    scores["overall"] = round(sum(valid_scores) / len(valid_scores)) if valid_scores else None
+    # ── Overall — style-weighted average ─────────────────────────────────────
+    # Base weights: 25% each. Adjusted by club's pressing intensity and play style.
+    w = {"out_of_possession": 0.25, "in_possession": 0.25,
+         "gap_fill": 0.25, "physical_fit": 0.25}
+
+    if ppda is not None:
+        if ppda < 8:       # High press — out of possession most important
+            w["out_of_possession"] += 0.15
+            w["in_possession"]     -= 0.05
+            w["gap_fill"]          -= 0.05
+            w["physical_fit"]      -= 0.05
+        elif ppda > 12:    # Low block — physicality and gap fill trump pressing
+            w["out_of_possession"] -= 0.10
+            w["physical_fit"]      += 0.15
+            w["gap_fill"]          += 0.05
+            w["in_possession"]     -= 0.10
+
+    if possession is not None:
+        if possession > 55:                      # Possession — in possession critical
+            w["in_possession"]     += 0.15
+            w["out_of_possession"] -= 0.05
+            w["gap_fill"]          -= 0.05
+            w["physical_fit"]      -= 0.05
+        elif long_pass and long_pass > 35:       # Direct — physical over technique
+            w["physical_fit"]      += 0.10
+            w["in_possession"]     -= 0.10
+
+    # Clamp weights to [0, 1] and normalise so they always sum to 1
+    w = {k: max(0.0, v) for k, v in w.items()}
+    total_w = sum(w.values())
+    if total_w > 0:
+        w = {k: v / total_w for k, v in w.items()}
+
+    weighted = sum(
+        scores[k] * w[k]
+        for k in w
+        if scores.get(k) is not None
+    )
+    active_w = sum(w[k] for k in w if scores.get(k) is not None)
+    scores["overall"] = round(weighted / active_w) if active_w > 0 else None
 
     return scores

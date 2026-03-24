@@ -278,8 +278,8 @@ def _build_data_summary(
         if overall is not None:
             lines.append(f"  Overall: {overall}/100")
         for dim, label in [
-            ("press_fit",    "Press fit"),
-            ("buildup_fit",  "Build-up fit"),
+            ("out_of_possession",    "Out of possession"),
+            ("in_possession",  "In possession"),
             ("gap_fill",     "Gap fill"),
             ("physical_fit", "Physical fit"),
         ]:
@@ -386,8 +386,8 @@ def _build_prompt(
     if fit_score:
         overall = fit_score.get("overall")
         dims = {
-            "press_fit":   "Press fit",
-            "buildup_fit": "Build-up fit",
+            "out_of_possession":   "Out of possession",
+            "in_possession": "In possession",
             "gap_fill":    "Gap fill (addresses club weaknesses)",
             "physical_fit":"Physical fit",
         }
@@ -531,8 +531,8 @@ for _cn, _cp in _all_profiles_rank.items():
                 "Formation": _cp.get("primary_formation", ""),
                 "Style":     " · ".join(filter(None, [_cp.get("press_intensity"), _cp.get("play_style")])),
                 "Overall":   _fs["overall"],
-                "Press":     _fs.get("press_fit"),
-                "Build-up":  _fs.get("buildup_fit"),
+                "Out of poss":     _fs.get("out_of_possession"),
+                "In poss":  _fs.get("in_possession"),
                 "Gap fill":  _fs.get("gap_fill"),
                 "Physical":  _fs.get("physical_fit"),
             })
@@ -565,7 +565,7 @@ if _club_scores:
     st.dataframe(
         _rank_df.style.format(
             {c: lambda v: f"{int(v)}" if pd.notna(v) else "–"
-             for c in ["Overall", "Press", "Build-up", "Gap fill", "Physical"]}
+             for c in ["Overall", "Out of poss", "In poss", "Gap fill", "Physical"]}
         ).applymap(_score_colour, subset=["Overall"]),
         use_container_width=True,
         hide_index=True,
@@ -906,8 +906,8 @@ if _club_profile.get("matches", 0) > 0 and (ws_peers or phys_peers):
         st.markdown('<div class="section-header">Style fit score</div>', unsafe_allow_html=True)
         _fit_dims = [
             ("Overall", "overall"),
-            ("Press fit", "press_fit"),
-            ("Build-up fit", "buildup_fit"),
+            ("Out of possession", "out_of_possession"),
+            ("In possession", "in_possession"),
             ("Gap fill", "gap_fill"),
             ("Physical fit", "physical_fit"),
         ]

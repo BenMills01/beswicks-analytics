@@ -581,8 +581,8 @@ def generate_pdf(
         if fit_score and fit_score.get("overall") is not None:
             _fit_dims = [
                 ("OVERALL",   "overall"),
-                ("PRESS",     "press_fit"),
-                ("BUILD-UP",  "buildup_fit"),
+                ("PRESS",     "out_of_possession"),
+                ("BUILD-UP",  "in_possession"),
                 ("GAP FILL",  "gap_fill"),
                 ("PHYSICAL",  "physical_fit"),
             ]
