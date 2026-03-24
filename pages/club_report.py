@@ -18,7 +18,8 @@ import anthropic
 from src.clubs import (
     get_club_list, get_club_profile, fuzzy_match_club, format_club_context,
     get_all_club_profiles, get_league_medians, get_club_weaknesses,
-    suggest_club_need, get_club_squad_at_position, get_style_fit_score,
+    filter_weaknesses_by_position, suggest_club_need,
+    get_club_squad_at_position, get_style_fit_score,
 )
 from src.metrics import (
     get_season_totals, get_physical_totals, build_match_log,
@@ -657,7 +658,8 @@ if available_clubs:
 
             # ── Weakness diagnosis ────────────────────────────────────────────
             _, _medians = _cached_all_profiles_and_medians()
-            _weaknesses = get_club_weaknesses(_club_profile, _medians)
+            _weaknesses_all = get_club_weaknesses(_club_profile, _medians)
+            _weaknesses = filter_weaknesses_by_position(_weaknesses_all, ws_pos_key)
             _auto_club_need = suggest_club_need(_weaknesses, _club_profile)
 
             if _weaknesses:

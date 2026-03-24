@@ -14,7 +14,7 @@ import os
 import glob
 import difflib
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -362,6 +362,51 @@ def get_club_weaknesses(
             })
 
     return sorted(weaknesses, key=lambda x: x["gap_pct"], reverse=True)
+
+
+# Metrics that a given position can realistically address.
+# Weaknesses NOT in this set are excluded from the diagnosis for that position.
+_POSITION_WEAKNESS_RELEVANCE: Dict[str, set] = {
+    'Central Defender': {
+        'avg_def_duel_win_pct', 'avg_aerial_win_pct',
+        'avg_goals_conceded',   'avg_possession', 'avg_pass_acc_pct',
+    },
+    'Full Back': {
+        'avg_def_duel_win_pct', 'avg_possession', 'avg_pass_acc_pct',
+    },
+    'Central Mid': {
+        'avg_possession', 'avg_pass_acc_pct', 'avg_def_duel_win_pct',
+    },
+    'Att Mid': {
+        'avg_goals_scored', 'avg_possession', 'avg_pass_acc_pct',
+    },
+    'Wide Mid': {
+        'avg_goals_scored', 'avg_possession', 'avg_pass_acc_pct',
+    },
+    'Center Forward': {
+        'avg_goals_scored', 'avg_aerial_win_pct',
+    },
+    'Goalkeeper': {
+        'avg_goals_conceded', 'avg_possession', 'avg_pass_acc_pct',
+    },
+}
+
+
+def filter_weaknesses_by_position(
+    weaknesses: list[dict],
+    pos_key: str | None,
+) -> list[dict]:
+    """
+    Remove weaknesses that the given position cannot realistically address.
+
+    A full-back cannot fix a goals-scored deficit; a centre-forward cannot fix
+    a defensive-duel weakness. If pos_key is None or unknown, all weaknesses
+    are returned unchanged.
+    """
+    if not pos_key or pos_key not in _POSITION_WEAKNESS_RELEVANCE:
+        return weaknesses
+    relevant = _POSITION_WEAKNESS_RELEVANCE[pos_key]
+    return [w for w in weaknesses if w["metric"] in relevant]
 
 
 def suggest_club_need(
