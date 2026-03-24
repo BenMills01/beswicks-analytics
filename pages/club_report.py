@@ -536,13 +536,23 @@ _club_scores.sort(key=lambda x: x["Overall"], reverse=True)
 if _club_scores:
     _rank_df = pd.DataFrame(_club_scores[:10])
     _rank_df.insert(0, "#", range(1, len(_rank_df) + 1))
+    def _score_colour(val):
+        try:
+            v = int(val)
+        except (TypeError, ValueError):
+            return ""
+        if v >= 70:
+            return "background-color: #166534; color: #86efac"
+        elif v >= 55:
+            return "background-color: #854d0e; color: #fde68a"
+        else:
+            return "background-color: #7f1d1d; color: #fca5a5"
+
     st.dataframe(
         _rank_df.style.format(
             {c: lambda v: f"{int(v)}" if pd.notna(v) else "–"
              for c in ["Overall", "Press", "Build-up", "Gap fill", "Physical"]}
-        ).background_gradient(
-            subset=["Overall"], cmap="RdYlGn", vmin=30, vmax=90
-        ),
+        ).applymap(_score_colour, subset=["Overall"]),
         use_container_width=True,
         hide_index=True,
     )
