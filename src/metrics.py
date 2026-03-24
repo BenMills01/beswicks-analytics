@@ -70,8 +70,10 @@ def p90(value: float, minutes: float) -> float:
 
 
 def pct(num: float, denom: float) -> Optional[float]:
-    """Return (num / denom) * 100, rounded to 1 dp. Returns None if denom is zero."""
-    if denom == 0:
+    """Return (num / denom) * 100, rounded to 1 dp. Returns None if denom is zero or None."""
+    if denom is None or denom == 0:
+        return None
+    if num is None:
         return None
     return round((num / denom) * 100, 1)
 
