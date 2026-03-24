@@ -227,6 +227,9 @@ def generate_pdf(
     audience='internal',
     narrative_text: str = None,
     club_name: str = None,
+    weaknesses: list = None,
+    squad_df=None,
+    fit_score: dict = None,
 ):
     """
     Build and return the PDF as bytes.
@@ -256,8 +259,24 @@ def generate_pdf(
         title=f"Beswicks Sports — {name}",
     )
 
-    story    = []
+    story     = []
     tmp_files = []  # track temp files to clean up
+
+    # Audience-aware page background + footer
+    def _draw_bg(canvas, doc):
+        canvas.saveState()
+        canvas.setFillColor(BG)
+        canvas.rect(0, 0, W, H, fill=1, stroke=0)
+        canvas.setFillColor(GOLD)
+        canvas.rect(0, H - 8, W, 8, fill=1, stroke=0)
+        canvas.setFillColor(GREY3)
+        canvas.setFont('Helvetica', 6.5)
+        if audience == 'club' and club_name:
+            _footer = f"Prepared for {club_name}  ·  Beswicks Sports Management  ·  {datetime.now().strftime('%d %b %Y')}"
+        else:
+            _footer = f"Beswicks Sports Analytics  ·  Internal Use Only  ·  {datetime.now().strftime('%d %b %Y')}"
+        canvas.drawCentredString(W / 2, 12, _footer)
+        canvas.restoreState()
 
     def chart_image(fig, w_mm, h_mm, width_px=700, height_px=300):
         path = fig_to_tmpfile(fig, width=width_px, height=height_px)
@@ -472,9 +491,13 @@ def generate_pdf(
     story.append(PageBreak())
 
     # ── Page 2: Radar + physical chart ───────────────────────────────────────
-    # Club already showed radar on page 1; show physical chart here for all
+    # Club already showed radar on page 1; show radar + physical table here for others
+    # For club audience, show the physical metrics table instead of radar
     if audience != 'club':
         for item in _radar_section(show_weaknesses=True):
+            story.append(item)
+    else:
+        for item in _phys_section():
             story.append(item)
 
     if ph is not None and 'dist_p90_m' in ph.columns:
@@ -537,23 +560,159 @@ def generate_pdf(
     ]))
     story.append(log_tbl)
 
-    # ── Optional narrative page (club analysis) ────────────────────────────────
-    if narrative_text:
+    # ── Club Fit Analysis page ─────────────────────────────────────────────────
+    _has_fit_page = (
+        (fit_score and fit_score.get("overall") is not None) or
+        weaknesses or
+        (squad_df is not None and not squad_df.empty) or
+        (narrative_text and '=====' not in narrative_text)
+    )
+    if _has_fit_page:
         story.append(PageBreak())
         story.append(Paragraph("CLUB FIT ANALYSIS", S_SECTION))
         story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=10))
-        S_NARRATIVE = _style('narr', fontSize=9, textColor=LGREY, leading=14, spaceAfter=8)
-        for para in narrative_text.strip().split('\n\n'):
-            if para.strip():
-                story.append(Paragraph(para.strip().replace('\n', ' '), S_NARRATIVE))
-        story.append(Spacer(1, 16))
-        story.append(HRFlowable(width='100%', thickness=0.3, color=GREY2))
-        story.append(Spacer(1, 6))
-        footer_text = f"Prepared for {club_name} — Beswicks Sports Management" if club_name else "Beswicks Sports Management"
-        story.append(Paragraph(footer_text, _style('nf', fontSize=7, textColor=GREY3, alignment=TA_CENTER)))
+
+        # ── Fit score cards ──────────────────────────────────────────────────
+        if fit_score and fit_score.get("overall") is not None:
+            _fit_dims = [
+                ("OVERALL",   "overall"),
+                ("PRESS",     "press_fit"),
+                ("BUILD-UP",  "buildup_fit"),
+                ("GAP FILL",  "gap_fill"),
+                ("PHYSICAL",  "physical_fit"),
+            ]
+            _avail_w = W - 2 * MARGIN
+            _card_w  = _avail_w / 5
+            _card_row = []
+            for _label, _key in _fit_dims:
+                _v = fit_score.get(_key)
+                if _v is not None:
+                    _col = GREEN if _v >= 70 else (YELLOW if _v >= 50 else RED)
+                    _col_hex = '#{:02x}{:02x}{:02x}'.format(
+                        int(_col.red * 255), int(_col.green * 255), int(_col.blue * 255))
+                    _cell = Paragraph(
+                        f'<font size="6" color="#666666">{_label}</font><br/>'
+                        f'<font size="18" color="{_col_hex}"><b>{_v}</b></font><br/>'
+                        f'<font size="6" color="#555555">/100</font>',
+                        _style(f'card_{_key}', alignment=TA_CENTER, leading=24, spaceAfter=0),
+                    )
+                else:
+                    _cell = Paragraph(
+                        f'<font size="6" color="#666666">{_label}</font><br/>'
+                        f'<font size="18" color="#444444"><b>–</b></font>',
+                        _style(f'card_{_key}', alignment=TA_CENTER, leading=24, spaceAfter=0),
+                    )
+                _card_row.append(_cell)
+            _cards_tbl = Table([_card_row], colWidths=[_card_w] * 5)
+            _cards_tbl.setStyle(TableStyle([
+                ('BACKGROUND',    (0, 0), (-1, -1), GREY1),
+                ('GRID',          (0, 0), (-1, -1), 0.3, GREY2),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
+                ('TOPPADDING',    (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+                # Highlight the Overall card with a gold left border effect
+                ('BACKGROUND',    (0, 0), (0, 0), HexColor('#1e1a10')),
+            ]))
+            story.append(_cards_tbl)
+            story.append(Spacer(1, 14))
+
+        # ── Weakness profile table ───────────────────────────────────────────
+        if weaknesses:
+            story.append(Paragraph("CLUB WEAKNESS PROFILE", S_SECTION))
+            _w_header = [
+                Paragraph("Metric",        _style('wh0', fontSize=7, textColor=GOLD, fontName='Helvetica-Bold')),
+                Paragraph("Club",          _style('wh1', fontSize=7, textColor=GOLD, fontName='Helvetica-Bold')),
+                Paragraph("League Median", _style('wh2', fontSize=7, textColor=GOLD, fontName='Helvetica-Bold')),
+                Paragraph("Gap",           _style('wh3', fontSize=7, textColor=GOLD, fontName='Helvetica-Bold')),
+                Paragraph("Signal",        _style('wh4', fontSize=7, textColor=GOLD, fontName='Helvetica-Bold')),
+            ]
+            _w_rows = [_w_header]
+            for _w in (weaknesses or [])[:6]:
+                _dir     = "▲" if _w.get("inverse") else "▼"
+                _gap_pct = _w.get("gap_pct", 0)
+                _gap_col = RED if _gap_pct > 20 else YELLOW
+                _gap_hex = '#{:02x}{:02x}{:02x}'.format(
+                    int(_gap_col.red * 255), int(_gap_col.green * 255), int(_gap_col.blue * 255))
+                _w_rows.append([
+                    Paragraph(str(_w.get("label", "")),
+                              _style('wb0', fontSize=7.5, textColor=LGREY)),
+                    Paragraph(f"{_w.get('club_val', 0):.1f}",
+                              _style('wb1', fontSize=7.5, textColor=LGREY)),
+                    Paragraph(f"{_w.get('median_val', 0):.1f}",
+                              _style('wb2', fontSize=7.5, textColor=LGREY)),
+                    Paragraph(f'<font color="{_gap_hex}">{_dir} {_gap_pct:.1f}%</font>',
+                              _style('wb3', fontSize=7.5, textColor=LGREY)),
+                    Paragraph(str(_w.get("interpretation", "")),
+                              _style('wb4', fontSize=7, textColor=GREY3, leading=10)),
+                ])
+            _w_avail  = W - 2 * MARGIN
+            _w_widths = [_w_avail * f for f in [0.22, 0.10, 0.14, 0.12, 0.42]]
+            story.append(dark_table(_w_rows, _w_widths, header=True))
+            story.append(Spacer(1, 14))
+
+        # ── Squad comparison table ───────────────────────────────────────────
+        if squad_df is not None and not squad_df.empty:
+            story.append(Paragraph("SQUAD COMPARISON — EXISTING PLAYERS AT THIS POSITION", S_SECTION))
+            _priority = [
+                "Player", "Minutes played",
+                "Aerial duels won, %", "Aerial duels per 90",
+                "Defensive duels won, %", "Defensive duels per 90",
+                "Duels won, %", "Passes per 90",
+            ]
+            _sq_cols = [c for c in _priority if c in squad_df.columns]
+            for c in squad_df.columns:
+                if c not in _sq_cols and len(_sq_cols) < 8:
+                    _sq_cols.append(c)
+            _short = {
+                "Minutes played": "Mins",
+                "Aerial duels per 90": "Aerial p90", "Aerial duels won, %": "Aerial%",
+                "Defensive duels per 90": "Def p90",  "Defensive duels won, %": "Def%",
+                "Duels won, %": "Duel%",              "Passes per 90": "Pass p90",
+                "Duels per 90": "Duels p90",
+            }
+            _sq_header = [
+                Paragraph(_short.get(c, c), _style(f'sqh{i}', fontSize=6.5, textColor=GOLD, fontName='Helvetica-Bold'))
+                for i, c in enumerate(_sq_cols)
+            ]
+            _sq_rows = [_sq_header]
+            for _, row in squad_df[_sq_cols].iterrows():
+                _row_cells = []
+                for c in _sq_cols:
+                    v = row.get(c)
+                    if c == "Player":
+                        _row_cells.append(Paragraph(str(v) if v is not None else "–",
+                                                    _style('sqp', fontSize=7.5, textColor=LGREY)))
+                    elif v is None or (isinstance(v, float) and pd.isna(v)):
+                        _row_cells.append(Paragraph("–", _style('sqn', fontSize=7.5, textColor=GREY3)))
+                    elif c == "Minutes played":
+                        _row_cells.append(Paragraph(f"{v:.0f}", _style('sqm', fontSize=7.5, textColor=LGREY)))
+                    elif isinstance(v, (int, float)):
+                        _row_cells.append(Paragraph(f"{v:.1f}", _style('sqv', fontSize=7.5, textColor=LGREY)))
+                    else:
+                        _row_cells.append(Paragraph(str(v), _style('sqo', fontSize=7.5, textColor=LGREY)))
+                _sq_rows.append(_row_cells)
+            _sq_avail  = W - 2 * MARGIN
+            _n_sq_cols = len(_sq_cols)
+            _player_w  = _sq_avail * 0.22
+            _other_w   = (_sq_avail - _player_w) / max(_n_sq_cols - 1, 1)
+            _sq_widths = [_player_w if c == "Player" else _other_w for c in _sq_cols]
+            story.append(dark_table(_sq_rows, _sq_widths, header=True))
+            story.append(Spacer(1, 14))
+
+        # ── AI narrative (club audience only; skip data-only dumps) ──────────
+        if narrative_text and '=====' not in narrative_text:
+            story.append(Paragraph("TRANSFER PITCH", S_SECTION))
+            story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=8))
+            S_NARRATIVE = _style('narr', fontSize=9, textColor=LGREY, leading=14, spaceAfter=8)
+            for para in narrative_text.strip().split('\n\n'):
+                if para.strip():
+                    story.append(Paragraph(para.strip().replace('\n', ' '), S_NARRATIVE))
 
     # ── Build ─────────────────────────────────────────────────────────────────
-    doc.build(story, onFirstPage=_draw_background, onLaterPages=_draw_background)
+    doc.build(story, onFirstPage=_draw_bg, onLaterPages=_draw_bg)
 
     for f in tmp_files:
         try: os.unlink(f)

@@ -578,13 +578,12 @@ if "target_club_input" not in st.session_state:
 
 col_a, col_b = st.columns(2)
 with col_a:
-    target_club   = st.text_input(
+    target_club = st.text_input(
         "Club name",
         key="target_club_input",
         placeholder="e.g. Bristol City",
         help=f"{_n_clubs} club files available — start typing to auto-match" if _n_clubs else "No club files found in data/clubs/",
     )
-    target_league = st.text_input("League / division", placeholder="e.g. Championship")
 
 if not target_club:
     st.info("Select a club from the rankings above or type a name to generate a report.")
@@ -656,6 +655,15 @@ if available_clubs:
 
     else:
         st.caption(f"No file match for '{target_club}' in {_n_clubs} available clubs — using manual context only.")
+
+# ── League / division (auto-populated from club profile) ──────────────────────
+_auto_league = _club_profile.get("league", "") or ""
+target_league = st.text_input(
+    "League / division",
+    value=_auto_league,
+    placeholder="e.g. Championship",
+    help="Auto-populated from matched club file. Edit if needed.",
+)
 
 # ── What they need + extra context ────────────────────────────────────────────
 col_need, col_extra = st.columns(2)
@@ -897,6 +905,11 @@ if (st.session_state.narrative and
                         if pct_v is not None:
                             radar_data[label] = pct_v
 
+                    # Only pass AI narrative prose to PDF — skip data-only dumps
+                    _pdf_narrative = st.session_state.narrative
+                    if _pdf_narrative and '=====' in _pdf_narrative:
+                        _pdf_narrative = None
+
                     pdf_bytes = generate_pdf(
                         name=selected_name, club=club, league=player_league or target_league or "", pos=pos,
                         age_val=24,
@@ -908,8 +921,11 @@ if (st.session_state.narrative and
                         ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
                         peer_desc=f"{' + '.join(peer_leagues)} · {min_mins_peer}+ mins",
                         audience='club',
-                        narrative_text=st.session_state.narrative,
+                        narrative_text=_pdf_narrative,
                         club_name=target_club,
+                        weaknesses=_weaknesses or None,
+                        squad_df=_squad_df,
+                        fit_score=_fit_score or None,
                     )
 
                     safe_name = selected_name.replace(' ', '_')
