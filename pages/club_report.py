@@ -690,6 +690,65 @@ target_league = st.text_input(
     help="Auto-populated from matched club file. Edit if needed.",
 )
 
+# ── Squad data — computed early so position gaps can inform the auto-fill ──────
+_squad_df = None
+_pos_gaps = []
+if _matched_name and ws_pos_key:
+    _squad_df = get_club_squad_at_position(_matched_name, ws_pos_key, WS_FILES, min_mins=min_mins_peer)
+    if _squad_df is not None and not _squad_df.empty:
+        _squad_lines = [f"  {row.get('Player','?')}: " + ", ".join(
+            f"{col} {row[col]:.1f}" if pd.api.types.is_float(row.get(col)) or pd.api.types.is_integer(row.get(col)) else str(row.get(col, ""))
+            for col in _squad_df.columns if col != "Player" and row.get(col) is not None
+        ) for _, row in _squad_df.iterrows()]
+        _squad_context = "\n".join(_squad_lines)
+
+        # Compute position-level gaps vs peer median
+        _SQUAD_COL_TO_PEER = {
+            'Passes per 90':           'passes_p90',
+            'Accurate passes, %':      'pass_acc',
+            'Duels won, %':            'duel_win',
+            'Aerial duels per 90':     'aerial_p90',
+            'Aerial duels won, %':     'aerial_win',
+            'Defensive duels per 90':  'def_duels_p90',
+            'Defensive duels won, %':  'def_duel_win',
+            'Interceptions per 90':    'interceptions_p90',
+            'Goals per 90':            'goals_p90',
+            'xG per 90':               'xg_p90',
+            'Progressive runs per 90': 'prog_runs_p90',
+        }
+        _pos_gaps = []
+        for _col, _pkey in _SQUAD_COL_TO_PEER.items():
+            if _col not in _squad_df.columns or _pkey not in ws_peers:
+                continue
+            _squad_avg = pd.to_numeric(_squad_df[_col], errors='coerce').mean()
+            _peer_med  = ws_peers[_pkey].median()
+            if pd.isna(_squad_avg) or pd.isna(_peer_med) or _peer_med == 0:
+                continue
+            _gap_pct = round((_peer_med - _squad_avg) / _peer_med * 100, 1)
+            if _gap_pct > 3:
+                _pos_gaps.append({
+                    "label":     _col,
+                    "squad_avg": round(_squad_avg, 1),
+                    "peer_med":  round(_peer_med, 1),
+                    "gap_pct":   _gap_pct,
+                })
+        _pos_gaps.sort(key=lambda x: x["gap_pct"], reverse=True)
+
+        # Prepend the strongest positional gap into the auto-fill
+        if _pos_gaps:
+            _top_gap_label = _pos_gaps[0]["label"].lower().replace(" per 90", "").replace(", %", " rate")
+            _gap_prefix = f"upgrade {_top_gap_label} at {ws_pos_key.lower()}"
+            if _gap_prefix not in _auto_club_need:
+                _auto_club_need = (_gap_prefix + " — " + _auto_club_need).strip(" — ")
+
+            # Append position gaps to squad context for AI prompt
+            _pos_gap_lines = [f"\nPOSITION-LEVEL GAPS ({_matched_name} {ws_pos_key}s vs peer median):"]
+            for _g in _pos_gaps[:3]:
+                _pos_gap_lines.append(
+                    f"  {_g['label']}: squad avg {_g['squad_avg']:.1f} vs peer median {_g['peer_med']:.1f} (▼ {_g['gap_pct']:.1f}%)"
+                )
+            _squad_context += "\n" + "\n".join(_pos_gap_lines)
+
 # ── What they need + extra context ────────────────────────────────────────────
 col_need, col_extra = st.columns(2)
 with col_need:
@@ -707,34 +766,39 @@ with col_extra:
         placeholder="e.g. New manager rebuilding defensively, lost their first-choice CB to injury",
     )
 
-# ── Squad comparison ───────────────────────────────────────────────────────────
-if _matched_name and ws_pos_key:
-    _squad_df = get_club_squad_at_position(_matched_name, ws_pos_key, WS_FILES, min_mins=min_mins_peer)
-    if _squad_df is not None and not _squad_df.empty:
-        # Build plain-text squad context for prompt injection
-        _squad_lines = [f"  {row.get('Player','?')}: " + ", ".join(
-            f"{col} {row[col]:.1f}" if pd.api.types.is_float(row.get(col)) or pd.api.types.is_integer(row.get(col)) else str(row.get(col, ""))
-            for col in _squad_df.columns if col != "Player" and row.get(col) is not None
-        ) for _, row in _squad_df.iterrows()]
-        _squad_context = "\n".join(_squad_lines)
+# ── Squad comparison display ───────────────────────────────────────────────────
+if _squad_df is not None and not _squad_df.empty:
+    st.markdown('<div class="section-header">Squad comparison — existing players at this position</div>', unsafe_allow_html=True)
+    _display_squad = _squad_df.copy()
+    _col_renames = {
+        "Minutes played": "Mins", "Passes per 90": "Pass p90", "Accurate passes, %": "Pass%",
+        "Duels per 90": "Duels p90", "Duels won, %": "Duel%",
+        "Aerial duels per 90": "Aerial p90", "Aerial duels won, %": "Aerial%",
+        "Defensive duels per 90": "Def p90", "Defensive duels won, %": "Def%",
+        "Interceptions per 90": "Int p90",
+    }
+    _display_squad = _display_squad.rename(columns=_col_renames)
+    st.dataframe(
+        _display_squad.style.format(precision=1, na_rep="–"),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(f"{len(_squad_df)} player(s) from {_matched_name} at {ws_pos_key} · {min_mins_peer}+ mins")
 
-        st.markdown('<div class="section-header">Squad comparison — existing players at this position</div>', unsafe_allow_html=True)
-        _display_squad = _squad_df.copy()
-        # Rename columns to short labels
-        _col_renames = {
-            "Minutes played": "Mins", "Passes per 90": "Pass p90", "Accurate passes, %": "Pass%",
-            "Duels per 90": "Duels p90", "Duels won, %": "Duel%",
-            "Aerial duels per 90": "Aerial p90", "Aerial duels won, %": "Aerial%",
-            "Defensive duels per 90": "Def p90", "Defensive duels won, %": "Def%",
-            "Interceptions per 90": "Int p90",
-        }
-        _display_squad = _display_squad.rename(columns=_col_renames)
-        st.dataframe(
-            _display_squad.style.format(precision=1, na_rep="–"),
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.caption(f"{len(_squad_df)} player(s) from {_matched_name} at {ws_pos_key} · {min_mins_peer}+ mins")
+    # Position-level gap expander — data computed in squad data section above
+    if _pos_gaps:
+        with st.expander(f"Position-level gaps — {_matched_name} {ws_pos_key}s vs league median", expanded=False):
+            _gcols = st.columns([3, 1, 1, 1])
+            _gcols[0].markdown("**Metric**")
+            _gcols[1].markdown("**Squad avg**")
+            _gcols[2].markdown("**Peer median**")
+            _gcols[3].markdown("**Gap**")
+            for _g in _pos_gaps[:6]:
+                _gcols[0].write(_g["label"])
+                _gcols[1].write(f"{_g['squad_avg']:.1f}")
+                _gcols[2].write(f"{_g['peer_med']:.1f}")
+                _gcols[3].write(f"▼ {_g['gap_pct']:.1f}%")
+        st.caption("Gap = how far the existing squad at this role sits below the position peer median")
 
 # ── Most comparable players ─────────────────────────────────────────────────────
 _comparables_df = pd.DataFrame()
