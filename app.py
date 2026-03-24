@@ -230,7 +230,14 @@ def find_player_position_file(player_short_name):
 @st.cache_data
 def load_wyscout_position_file(pos_key, league_filter):
     """Load position-specific file(s) for the given position key and league filter."""
-    leagues = ['League One', 'League Two'] if league_filter == 'Both' else [league_filter]
+    if isinstance(league_filter, list):
+        leagues = league_filter
+    elif league_filter == 'Both':
+        leagues = ['League One', 'League Two']
+    elif league_filter == 'All':
+        leagues = ['Championship', 'League One', 'League Two']
+    else:
+        leagues = [league_filter]
     dfs = []
     for league in leagues:
         p = WS_FILES.get(league, {}).get(pos_key)
@@ -305,10 +312,19 @@ def get_named_phys_peers(phys_csv, position_group, min_mins, league_filter):
     """Return aggregated physical peer DataFrame with player names for ranking charts."""
     if phys_csv is None or not position_group: return None
     df = phys_csv[phys_csv['quality_check'] == True].copy()
-    if league_filter == 'League One':
-        df = df[df['competition_name'].str.contains('League One', na=False)]
-    elif league_filter == 'League Two':
-        df = df[df['competition_name'].str.contains('League Two', na=False)]
+    if isinstance(league_filter, list):
+        _selected = league_filter
+    elif league_filter == 'Both':
+        _selected = ['League One', 'League Two']
+    elif league_filter == 'All':
+        _selected = ['Championship', 'League One', 'League Two']
+    elif league_filter in ('Championship', 'League One', 'League Two'):
+        _selected = [league_filter]
+    else:
+        _selected = []
+    if _selected:
+        _pattern = '|'.join(_selected)
+        df = df[df['competition_name'].str.contains(_pattern, na=False)]
     df = df[df['group'] == position_group]
     agg = df.groupby('player_name').agg(
         mins         = ('minutes_played_per_match','sum'),
@@ -348,7 +364,14 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Peer group filters")
     min_mins_peer = st.slider("Min minutes", 450, 1800, 900, 90)
-    peer_league   = st.radio("League", ["Both","Championship","League One","League Two"], horizontal=True)
+    peer_leagues  = st.multiselect(
+        "Leagues",
+        ["Championship", "League One", "League Two"],
+        default=["Championship", "League One", "League Two"],
+    )
+    if not peer_leagues:
+        peer_leagues = ["Championship", "League One", "League Two"]
+    peer_league = peer_leagues  # list — peer builders accept list or str
 
     st.markdown("---")
     st.markdown("### Override player details")
@@ -486,7 +509,7 @@ try:
 except Exception:
     date_start, date_end = "–","–"
 
-peer_desc = f"{peer_league} · {min_mins_peer}+ mins · position-specific file"
+peer_desc = f"{' + '.join(peer_league) if isinstance(peer_league, list) else peer_league} · {min_mins_peer}+ mins · position-specific file"
 
 # ── Profile card ──────────────────────────────────────────────────────────────
 st.markdown(f"""
