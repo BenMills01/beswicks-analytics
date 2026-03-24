@@ -598,3 +598,164 @@ def build_physical_season_averages(phys_csv: Optional[pd.DataFrame]) -> Optional
     agg['hi_accel_p90']     = agg['hi_accel']     / agg['mins'] * 90
     agg['psv99_avg']        = agg['psv99']
     return agg
+
+
+# ── Comparable players ────────────────────────────────────────────────────────
+
+# Mapping: Wyscout peer file column → client season_totals key
+_COMPARABLE_FEATURE_MAP: Dict[str, str] = {
+    'Goals per 90':                       'goals_p90',
+    'Assists per 90':                     'assists_p90',
+    'xG per 90':                          'xg_p90',
+    'xA per 90':                          'xa_p90',
+    'Passes per 90':                      'passes_p90',
+    'Accurate passes, %':                 'pass_acc',
+    'Dribbles per 90':                    'dribbles_p90',
+    'Progressive runs per 90':            'prog_runs_p90',
+    'Duels per 90':                       'duels_p90',
+    'Duels won, %':                       'duel_win',
+    'Aerial duels per 90':                'aerial_p90',
+    'Aerial duels won, %':                'aerial_win',
+    'Defensive duels per 90':             'def_duels_p90',
+    'Defensive duels won, %':             'def_duel_win',
+    'Interceptions per 90':               'interceptions_p90',
+    'Successful defensive actions per 90':'recoveries_p90',
+}
+
+# Columns shown in the output table (peer file names → display label)
+_COMPARABLE_DISPLAY_COLS: Dict[str, str] = {
+    'Passes per 90':         'Pass p90',
+    'Accurate passes, %':    'Pass%',
+    'Duels won, %':          'Duel%',
+    'Aerial duels per 90':   'Aerial p90',
+    'Aerial duels won, %':   'Aerial%',
+    'Interceptions per 90':  'Int p90',
+    'Goals per 90':          'Goals p90',
+}
+
+
+def find_comparable_players(
+    client_totals: Dict[str, float],
+    pos_key: Optional[str],
+    league_filter,
+    min_mins: int,
+    ws_files: Dict[str, Dict[str, str]],
+    top_n: int = 8,
+    client_name: str = "",
+) -> pd.DataFrame:
+    """
+    Find the most statistically similar players to a client from the Wyscout peer group.
+
+    Uses z-score normalised Euclidean distance across a core set of per-90 metrics.
+    Only features where both the peer file column and the client's totals value
+    are available are included in the distance calculation.
+
+    Parameters
+    ----------
+    client_totals : dict
+        Season totals dict from get_season_totals() (or season_combined).
+    pos_key : str or None
+        Position key, e.g. 'Central Defender'.
+    league_filter : str or list
+        League selection — same format as build_wyscout_peers().
+    min_mins : int
+        Minimum season minutes for a peer player to be included.
+    ws_files : dict
+        Nested {league: {pos_key: path}} dict.
+    top_n : int
+        Number of most similar players to return.
+    client_name : str
+        Client's display name — excluded from the results.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: Player, Team, League, Minutes, Similarity, + key display cols.
+        Empty DataFrame if not enough data.
+    """
+    if not pos_key:
+        return pd.DataFrame()
+
+    if isinstance(league_filter, list):
+        leagues = league_filter
+    elif league_filter == 'Both':
+        leagues = ['League One', 'League Two']
+    elif league_filter == 'All':
+        leagues = ['Championship', 'League One', 'League Two']
+    else:
+        leagues = [league_filter]
+
+    dfs = []
+    for league in leagues:
+        path = ws_files.get(league, {}).get(pos_key)
+        if path and os.path.exists(path):
+            df = pd.read_excel(path)
+            df['_league'] = league
+            dfs.append(df)
+
+    if not dfs:
+        return pd.DataFrame()
+
+    df = pd.concat(dfs, ignore_index=True)
+    df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins].copy()
+
+    # Exclude the client player
+    if client_name:
+        # Try short name match (peer files use Wyscout short names)
+        client_short = client_name.split()[-1]  # last word as rough short name
+        df = df[~df['Player'].str.lower().str.contains(client_short.lower(), na=False)]
+
+    if len(df) < MIN_PEER_N:
+        return pd.DataFrame()
+
+    # Filter feature map to columns present in the file and with valid client values
+    use_map = {
+        peer_col: client_key
+        for peer_col, client_key in _COMPARABLE_FEATURE_MAP.items()
+        if peer_col in df.columns
+        and client_totals.get(client_key) is not None
+        and not pd.isna(client_totals.get(client_key, np.nan))
+    }
+
+    if len(use_map) < 4:
+        return pd.DataFrame()
+
+    feat_cols = list(use_map.keys())
+    peer_feats = df[feat_cols].apply(pd.to_numeric, errors='coerce')
+
+    # Drop peers with too many missing features
+    peer_feats = peer_feats.dropna(thresh=max(4, len(feat_cols) // 2))
+    df = df.loc[peer_feats.index]
+
+    client_vec = np.array([client_totals[use_map[c]] for c in feat_cols], dtype=float)
+
+    # Fill remaining NaNs with column mean before normalising
+    col_means = peer_feats.mean()
+    peer_feats = peer_feats.fillna(col_means)
+
+    # Z-score normalise using peer distribution
+    col_stds = peer_feats.std().replace(0, 1)
+    peer_norm   = (peer_feats - col_means) / col_stds
+    client_norm = (client_vec - col_means.values) / col_stds.values
+
+    distances = np.sqrt(((peer_norm.values - client_norm) ** 2).sum(axis=1))
+
+    df = df.copy()
+    df['_dist']    = distances
+    df['_mins']    = pd.to_numeric(df['Minutes played'], errors='coerce')
+    df = df.dropna(subset=['_dist']).sort_values('_dist')
+
+    max_d = df['_dist'].max()
+    df['Similarity'] = ((1 - df['_dist'] / max_d) * 100).clip(0, 100).round(1) if max_d > 0 else 100.0
+
+    # Build output table
+    display_cols = {c: lbl for c, lbl in _COMPARABLE_DISPLAY_COLS.items() if c in df.columns}
+    keep = ['Player', 'Team', '_league', '_mins', 'Similarity'] + list(display_cols.keys())
+    keep = [c for c in keep if c in df.columns]
+
+    result = df[keep].head(top_n).copy()
+    result = result.rename(columns={'_league': 'League', '_mins': 'Minutes'})
+    result = result.rename(columns=display_cols)
+    result['Minutes'] = result['Minutes'].astype(int)
+
+    return result
