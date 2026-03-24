@@ -690,6 +690,22 @@ target_league = st.text_input(
     help="Auto-populated from matched club file. Edit if needed.",
 )
 
+# Mapping: squad file display column → season_combined / ws_peers key
+# Used both when computing gaps and when showing client values in the table
+_SQUAD_COL_TO_PEER = {
+    'Passes per 90':           'passes_p90',
+    'Accurate passes, %':      'pass_acc',
+    'Duels won, %':            'duel_win',
+    'Aerial duels per 90':     'aerial_p90',
+    'Aerial duels won, %':     'aerial_win',
+    'Defensive duels per 90':  'def_duels_p90',
+    'Defensive duels won, %':  'def_duel_win',
+    'Interceptions per 90':    'interceptions_p90',
+    'Goals per 90':            'goals_p90',
+    'xG per 90':               'xg_p90',
+    'Progressive runs per 90': 'prog_runs_p90',
+}
+
 # ── Squad data — computed early so position gaps can inform the auto-fill ──────
 _squad_df = None
 _pos_gaps = []
@@ -701,21 +717,6 @@ if _matched_name and ws_pos_key:
             for col in _squad_df.columns if col != "Player" and row.get(col) is not None
         ) for _, row in _squad_df.iterrows()]
         _squad_context = "\n".join(_squad_lines)
-
-        # Compute position-level gaps vs peer median
-        _SQUAD_COL_TO_PEER = {
-            'Passes per 90':           'passes_p90',
-            'Accurate passes, %':      'pass_acc',
-            'Duels won, %':            'duel_win',
-            'Aerial duels per 90':     'aerial_p90',
-            'Aerial duels won, %':     'aerial_win',
-            'Defensive duels per 90':  'def_duels_p90',
-            'Defensive duels won, %':  'def_duel_win',
-            'Interceptions per 90':    'interceptions_p90',
-            'Goals per 90':            'goals_p90',
-            'xG per 90':               'xg_p90',
-            'Progressive runs per 90': 'prog_runs_p90',
-        }
         _pos_gaps = []
         for _col, _pkey in _SQUAD_COL_TO_PEER.items():
             if _col not in _squad_df.columns or _pkey not in ws_peers:
@@ -744,8 +745,12 @@ if _matched_name and ws_pos_key:
             # Append position gaps to squad context for AI prompt
             _pos_gap_lines = [f"\nPOSITION-LEVEL GAPS ({_matched_name} {ws_pos_key}s vs peer median):"]
             for _g in _pos_gaps[:3]:
+                _pk = _SQUAD_COL_TO_PEER.get(_g["label"])
+                _cv = season_combined.get(_pk) if _pk else None
+                _cv_str = f" | {selected_name.split()[0]} {_cv:.1f}" if _cv is not None else ""
+                _fills = " ✓ CLIENT FILLS GAP" if _cv is not None and _cv >= _g["peer_med"] else ""
                 _pos_gap_lines.append(
-                    f"  {_g['label']}: squad avg {_g['squad_avg']:.1f} vs peer median {_g['peer_med']:.1f} (▼ {_g['gap_pct']:.1f}%)"
+                    f"  {_g['label']}: squad avg {_g['squad_avg']:.1f}{_cv_str} vs peer median {_g['peer_med']:.1f} (▼ {_g['gap_pct']:.1f}%){_fills}"
                 )
             _squad_context += "\n" + "\n".join(_pos_gap_lines)
 
@@ -788,17 +793,34 @@ if _squad_df is not None and not _squad_df.empty:
     # Position-level gap expander — data computed in squad data section above
     if _pos_gaps:
         with st.expander(f"Position-level gaps — {_matched_name} {ws_pos_key}s vs league median", expanded=False):
-            _gcols = st.columns([3, 1, 1, 1])
+            _gcols = st.columns([3, 1, 1, 1, 1])
             _gcols[0].markdown("**Metric**")
             _gcols[1].markdown("**Squad avg**")
-            _gcols[2].markdown("**Peer median**")
-            _gcols[3].markdown("**Gap**")
+            _gcols[2].markdown(f"**{selected_name.split()[0]}**")
+            _gcols[3].markdown("**Peer median**")
+            _gcols[4].markdown("**Gap**")
             for _g in _pos_gaps[:6]:
+                _peer_key   = _SQUAD_COL_TO_PEER.get(_g["label"])
+                _client_val = season_combined.get(_peer_key) if _peer_key else None
+                # Colour: green = fills gap (above median), amber = partial (above squad, below median), red = below squad avg
+                if _client_val is not None:
+                    if _client_val >= _g["peer_med"]:
+                        _cv_colour = "#4ade80"   # green — fills the gap
+                    elif _client_val > _g["squad_avg"]:
+                        _cv_colour = "#facc15"   # amber — improvement but not at median
+                    else:
+                        _cv_colour = "#f87171"   # red — below existing squad
+                    _cv_str = f'<span style="color:{_cv_colour};font-weight:700">{_client_val:.1f}</span>'
+                else:
+                    _cv_str = '<span style="color:#555">–</span>'
                 _gcols[0].write(_g["label"])
                 _gcols[1].write(f"{_g['squad_avg']:.1f}")
-                _gcols[2].write(f"{_g['peer_med']:.1f}")
-                _gcols[3].write(f"▼ {_g['gap_pct']:.1f}%")
-        st.caption("Gap = how far the existing squad at this role sits below the position peer median")
+                _gcols[2].markdown(_cv_str, unsafe_allow_html=True)
+                _gcols[3].write(f"{_g['peer_med']:.1f}")
+                _gcols[4].write(f"▼ {_g['gap_pct']:.1f}%")
+        st.caption(
+            f"Client column: 🟢 above peer median (fills gap)  🟡 above squad avg (partial)  🔴 below squad avg"
+        )
 
 # ── Most comparable players ─────────────────────────────────────────────────────
 _comparables_df = pd.DataFrame()
