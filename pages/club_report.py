@@ -846,6 +846,8 @@ if ws_pos_key and season_combined:
             ws_files=WS_FILES,
             top_n=8,
             client_name=selected_name,
+            client_phys=phys,
+            phys_season_avgs=_cached_phys_avgs(phys_csv),
         )
     except Exception as _ce:
         st.warning(f"Could not compute comparable players: {_ce}")

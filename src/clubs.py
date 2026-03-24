@@ -132,6 +132,20 @@ def get_club_profile(club_name: str, filepath: str) -> dict:
     avg_def_duel_win_pct = _iloc_mean(_DEF_DUEL_WIN_PCT)
     avg_aerial_win_pct   = _iloc_mean(_AERIAL_WIN_PCT)
 
+    # ── Extended metrics (Gap 2) ───────────────────────────────────────────────
+    avg_xg_scored = _named("xG")
+
+    # Shots on target % = shots on target / shots * 100; None when column absent
+    _shots_on_tgt = _named("Shots on target")
+    _shots_total  = _named("Shots")
+    if _shots_on_tgt is not None and _shots_total is not None and _shots_total > 0:
+        avg_shots_on_tgt_pct: Optional[float] = round(_shots_on_tgt / _shots_total * 100, 1)
+    else:
+        avg_shots_on_tgt_pct = None
+
+    avg_interceptions = _named("Interceptions")
+    avg_crosses       = _named("Crosses")
+
     # ── Press intensity ───────────────────────────────────────────────────────
     # PPDA: passes per defensive action — lower = presses more aggressively
     if avg_ppda is not None:
@@ -185,6 +199,11 @@ def get_club_profile(club_name: str, filepath: str) -> dict:
         "press_intensity":       press_intensity,
         "play_style":            play_style,
         "league":                league,
+        # Extended metrics (Gap 2)
+        "avg_xg_scored":         avg_xg_scored,
+        "avg_shots_on_tgt_pct":  avg_shots_on_tgt_pct,
+        "avg_interceptions":     avg_interceptions,
+        "avg_crosses":           avg_crosses,
     }
 
 
@@ -300,6 +319,9 @@ def get_league_medians(all_profiles: dict[str, dict]) -> dict[str, float]:
         "avg_possession", "avg_ppda", "avg_pass_acc_pct", "avg_long_pass_pct",
         "avg_def_duel_win_pct", "avg_aerial_win_pct",
         "avg_goals_scored", "avg_goals_conceded",
+        # Extended metrics (Gap 2)
+        "avg_xg_scored", "avg_shots_on_tgt_pct",
+        "avg_interceptions", "avg_crosses",
     ]
     medians: dict[str, float] = {}
     for m in metrics:
@@ -336,6 +358,15 @@ def get_club_weaknesses(
          "Higher turnover rate in possession — need a reliable passer"),
         ("avg_goals_scored",     "Goals scored/game",    False,
          "Below-average attacking output — need more end-product"),
+        # Extended metrics (Gap 2)
+        ("avg_xg_scored",        "xG scored/game",       False,
+         "Below-average chance creation — need a player who generates xG"),
+        ("avg_shots_on_tgt_pct", "Shots on target %",    False,
+         "Poor finishing efficiency — need an end-product threat"),
+        ("avg_interceptions",    "Interceptions/game",   False,
+         "Low defensive proactivity — need a player who reads the game"),
+        ("avg_crosses",          "Crosses/game",         False,
+         "Limited wide threat — need delivery from wide areas"),
     ]
 
     weaknesses: list[dict] = []
@@ -370,24 +401,37 @@ _POSITION_WEAKNESS_RELEVANCE: Dict[str, set] = {
     'Central Defender': {
         'avg_def_duel_win_pct', 'avg_aerial_win_pct',
         'avg_goals_conceded',   'avg_possession', 'avg_pass_acc_pct',
+        # Gap 2
+        'avg_interceptions',
     },
     'Full Back': {
         'avg_def_duel_win_pct', 'avg_possession', 'avg_pass_acc_pct',
+        # Gap 2
+        'avg_crosses', 'avg_interceptions',
     },
     'Central Mid': {
         'avg_possession', 'avg_pass_acc_pct', 'avg_def_duel_win_pct',
+        # Gap 2
+        'avg_interceptions', 'avg_xg_scored',
     },
     'Att Mid': {
         'avg_goals_scored', 'avg_possession', 'avg_pass_acc_pct',
+        # Gap 2
+        'avg_xg_scored', 'avg_shots_on_tgt_pct',
     },
     'Wide Mid': {
         'avg_goals_scored', 'avg_possession', 'avg_pass_acc_pct',
+        # Gap 2
+        'avg_crosses', 'avg_xg_scored',
     },
     'Center Forward': {
         'avg_goals_scored', 'avg_aerial_win_pct',
+        # Gap 2
+        'avg_xg_scored', 'avg_shots_on_tgt_pct',
     },
     'Goalkeeper': {
         'avg_goals_conceded', 'avg_possession', 'avg_pass_acc_pct',
+        # Goalkeepers don't address xG/crossing/pressing deficits — no new additions
     },
 }
 

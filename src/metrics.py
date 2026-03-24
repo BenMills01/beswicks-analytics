@@ -602,6 +602,21 @@ def build_physical_season_averages(phys_csv: Optional[pd.DataFrame]) -> Optional
 
 # ── Comparable players ────────────────────────────────────────────────────────
 
+# Physical features used in the optional 20% physical blend.
+_PHYS_FEATURES = ["total_dist_p90", "hsr_dist_p90", "sprint_dist_p90", "psv99_avg"]
+
+# Per-position physical blend weight (0 = Wyscout only, 0.25 = 25% physical).
+# Higher for physically demanding positions; lower for technical roles.
+_PHYS_BLEND: Dict[str, float] = {
+    'Central Defender': 0.25,
+    'Full Back':        0.20,
+    'Central Mid':      0.15,
+    'Att Mid':          0.15,
+    'Wide Mid':         0.20,
+    'Center Forward':   0.25,
+    'Goalkeeper':       0.10,
+}
+
 # Mapping: Wyscout peer file column → client season_totals key
 _COMPARABLE_FEATURE_MAP: Dict[str, str] = {
     'Goals per 90':                       'goals_p90',
@@ -745,6 +760,118 @@ _COMPARABLE_DISPLAY_COLS: Dict[str, str] = {
 }
 
 
+def _apply_physical_blend(
+    ws_distances: np.ndarray,
+    peer_names: list,
+    client_phys: Dict[str, float],
+    phys_season_avgs: pd.DataFrame,
+    phys_blend: float,
+) -> np.ndarray:
+    """
+    Blend Wyscout distances with a physical distance component.
+
+    For each peer player, attempts a fuzzy name match (threshold 0.75) against
+    the SkillCorner player_name column. Where a match is found, a z-score
+    normalised Euclidean distance across _PHYS_FEATURES is blended in.
+    Peers without a physical match are penalised as Wyscout-only (no inflation).
+
+    Both distances are normalised to [0, 1] before blending so they contribute
+    on comparable scales regardless of the feature-space size.
+
+    Parameters
+    ----------
+    ws_distances : np.ndarray
+        Raw Wyscout weighted Euclidean distances (one per peer).
+    peer_names : list of str
+        Wyscout 'Player' column values, same order as ws_distances.
+    client_phys : dict
+        Client physical metrics from get_physical_totals().
+    phys_season_avgs : pd.DataFrame
+        Output of build_physical_season_averages() — one row per player.
+    phys_blend : float
+        Weight for the physical dimension (e.g. 0.20).  WS weight = 1 - phys_blend.
+
+    Returns
+    -------
+    np.ndarray
+        Final blended distances, same shape as ws_distances.
+    """
+    from difflib import get_close_matches, SequenceMatcher
+
+    # Only use features available in both client and the phys_season_avgs table
+    avail_feats = [
+        f for f in _PHYS_FEATURES
+        if f in phys_season_avgs.columns
+        and client_phys.get(f) is not None
+        and not pd.isna(client_phys.get(f, np.nan))
+    ]
+    if len(avail_feats) < 2:
+        return ws_distances   # client lacks physical data — skip blend
+
+    client_arr = np.array([client_phys[f] for f in avail_feats], dtype=float)
+
+    # Normalise using the distribution of ALL physical players (not just peers)
+    phys_df    = phys_season_avgs[avail_feats].dropna()
+    p_means    = phys_df.mean().values
+    p_stds     = phys_df.std().replace(0, 1).values
+    client_n   = (client_arr - p_means) / p_stds
+
+    phys_names     = phys_season_avgs["player_name"].tolist()
+    phys_names_low = [p.lower() for p in phys_names]
+
+    # Compute physical distance for each peer
+    peer_phys_dists: list = []
+    for peer_name in peer_names:
+        try:
+            name_low = str(peer_name).lower()
+            # Fast pre-filter with get_close_matches, fall back to full scan
+            candidates = get_close_matches(name_low, phys_names_low, n=1, cutoff=0.75)
+            if candidates:
+                idx = phys_names_low.index(candidates[0])
+                matched = phys_names[idx]
+            else:
+                # Full scan for names that get_close_matches misses
+                best_r, matched = 0.0, None
+                for orig, low in zip(phys_names, phys_names_low):
+                    r = SequenceMatcher(None, name_low, low).ratio()
+                    if r > best_r:
+                        best_r, matched = r, orig
+                if best_r < 0.75:
+                    matched = None
+
+            if matched is None:
+                peer_phys_dists.append(None)
+                continue
+
+            row      = phys_season_avgs.loc[phys_season_avgs["player_name"] == matched].iloc[0]
+            peer_arr = np.array([row.get(f, np.nan) for f in avail_feats], dtype=float)
+            if np.any(np.isnan(peer_arr)):
+                peer_phys_dists.append(None)
+            else:
+                peer_n   = (peer_arr - p_means) / p_stds
+                peer_phys_dists.append(float(np.sqrt(np.sum((peer_n - client_n) ** 2))))
+
+        except Exception:
+            peer_phys_dists.append(None)
+
+    # Normalise both WS and physical distances to [0, 1] before blending
+    ws_max = float(ws_distances.max()) if ws_distances.max() > 0 else 1.0
+    phys_raw = [d for d in peer_phys_dists if d is not None]
+    phys_max = max(phys_raw) if phys_raw else 1.0
+    if phys_max == 0:
+        phys_max = 1.0
+
+    final = np.empty(len(ws_distances), dtype=float)
+    for i, phys_d in enumerate(peer_phys_dists):
+        ws_n = ws_distances[i] / ws_max
+        if phys_d is not None:
+            final[i] = (1 - phys_blend) * ws_n + phys_blend * (phys_d / phys_max)
+        else:
+            final[i] = ws_n   # no physical data → Wyscout only, no penalty
+
+    return final
+
+
 def find_comparable_players(
     client_totals: Dict[str, float],
     pos_key: Optional[str],
@@ -753,15 +880,20 @@ def find_comparable_players(
     ws_files: Dict[str, Dict[str, str]],
     top_n: int = 8,
     client_name: str = "",
+    client_phys: Optional[Dict[str, float]] = None,
+    phys_season_avgs: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Find the most statistically similar players to a client from the Wyscout peer group.
 
-    Uses position-weighted, z-score normalised Euclidean distance across a core set
-    of per-90 metrics. Weights are defined in _POSITION_WEIGHTS — metrics central
-    to the role receive 2–3x weight; irrelevant metrics receive 0.2–0.5x.
-    Only features where both the peer file column and the client's totals value
-    are available are included in the distance calculation.
+    Primary signal: position-weighted, z-score normalised Euclidean distance across
+    Wyscout per-90 metrics (_COMPARABLE_FEATURE_MAP). Position weights in
+    _POSITION_WEIGHTS emphasise role-critical metrics 2–3x.
+
+    Optional physical blend: when client_phys and phys_season_avgs are supplied,
+    a physical distance (total dist, HSR, sprint dist, PSV99) is blended in at
+    the position-specific weight defined in _PHYS_BLEND (15–25%).  Peers with no
+    matching physical record are scored on Wyscout only — they are not penalised.
 
     Parameters
     ----------
@@ -779,6 +911,10 @@ def find_comparable_players(
         Number of most similar players to return.
     client_name : str
         Client's display name — excluded from the results.
+    client_phys : dict or None
+        Physical metrics from get_physical_totals().  Pass None to skip blend.
+    phys_season_avgs : pd.DataFrame or None
+        Output of build_physical_season_averages().  Pass None to skip blend.
 
     Returns
     -------
@@ -861,8 +997,23 @@ def find_comparable_players(
     diff = peer_norm.values - client_norm
     distances = np.sqrt((weight_vec * diff ** 2).sum(axis=1))
 
+    # ── Physical blend (Gap 3) ────────────────────────────────────────────────
+    # Optionally blends a physical distance (total dist, HSR, sprint, PSV99) at
+    # the position-specific weight.  Falls back to Wyscout-only if data is absent.
+    phys_blend = _PHYS_BLEND.get(pos_key, 0.20) if (client_phys and phys_season_avgs is not None) else 0.0
+    if phys_blend > 0:
+        final_distances = _apply_physical_blend(
+            ws_distances=distances,
+            peer_names=df["Player"].tolist(),
+            client_phys=client_phys,
+            phys_season_avgs=phys_season_avgs,
+            phys_blend=phys_blend,
+        )
+    else:
+        final_distances = distances
+
     df = df.copy()
-    df['_dist']    = distances
+    df['_dist']    = final_distances
     df['_mins']    = pd.to_numeric(df['Minutes played'], errors='coerce')
     df = df.dropna(subset=['_dist']).sort_values('_dist')
 
