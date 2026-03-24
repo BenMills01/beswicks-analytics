@@ -793,34 +793,44 @@ if _squad_df is not None and not _squad_df.empty:
     # Position-level gap expander — data computed in squad data section above
     if _pos_gaps:
         with st.expander(f"Position-level gaps — {_matched_name} {ws_pos_key}s vs league median", expanded=False):
-            _gcols = st.columns([3, 1, 1, 1, 1])
-            _gcols[0].markdown("**Metric**")
-            _gcols[1].markdown("**Squad avg**")
-            _gcols[2].markdown(f"**{selected_name.split()[0]}**")
-            _gcols[3].markdown("**Peer median**")
-            _gcols[4].markdown("**Gap**")
+            # Header
+            _gcols = st.columns([3, 1, 1, 1, 2])
+            for _hdr, _col in zip(
+                ["**Metric**", "**Squad avg**", "**Peer median**",
+                 f"**{selected_name.split()[0]}**", "**Verdict**"],
+                _gcols,
+            ):
+                _col.markdown(_hdr)
+
             for _g in _pos_gaps[:6]:
                 _peer_key   = _SQUAD_COL_TO_PEER.get(_g["label"])
                 _client_val = season_combined.get(_peer_key) if _peer_key else None
-                # Colour: green = fills gap (above median), amber = partial (above squad, below median), red = below squad avg
-                if _client_val is not None:
-                    if _client_val >= _g["peer_med"]:
-                        _cv_colour = "#4ade80"   # green — fills the gap
-                    elif _client_val > _g["squad_avg"]:
-                        _cv_colour = "#facc15"   # amber — improvement but not at median
-                    else:
-                        _cv_colour = "#f87171"   # red — below existing squad
-                    _cv_str = f'<span style="color:{_cv_colour};font-weight:700">{_client_val:.1f}</span>'
-                else:
-                    _cv_str = '<span style="color:#555">–</span>'
+                _gcols = st.columns([3, 1, 1, 1, 2])
                 _gcols[0].write(_g["label"])
                 _gcols[1].write(f"{_g['squad_avg']:.1f}")
-                _gcols[2].markdown(_cv_str, unsafe_allow_html=True)
-                _gcols[3].write(f"{_g['peer_med']:.1f}")
-                _gcols[4].write(f"▼ {_g['gap_pct']:.1f}%")
-        st.caption(
-            f"Client column: 🟢 above peer median (fills gap)  🟡 above squad avg (partial)  🔴 below squad avg"
-        )
+                _gcols[2].write(f"{_g['peer_med']:.1f}")
+
+                if _client_val is not None:
+                    if _client_val >= _g["peer_med"]:
+                        _colour  = "#4ade80"
+                        _verdict = "✓ Fills gap"
+                    elif _client_val > _g["squad_avg"]:
+                        _colour  = "#facc15"
+                        _verdict = "↑ Partial upgrade"
+                    else:
+                        _colour  = "#f87171"
+                        _verdict = "✗ Below squad"
+                    _gcols[3].markdown(
+                        f'<span style="color:{_colour};font-weight:700">{_client_val:.1f}</span>',
+                        unsafe_allow_html=True,
+                    )
+                    _gcols[4].markdown(
+                        f'<span style="color:{_colour}">{_verdict}</span>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    _gcols[3].write("–")
+                    _gcols[4].write("–")
 
 # ── Most comparable players ─────────────────────────────────────────────────────
 _comparables_df = pd.DataFrame()
