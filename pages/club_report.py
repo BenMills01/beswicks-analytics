@@ -148,6 +148,14 @@ def find_player_position_file(player_short_name):
     return None
 
 
+def _ordinal(n: int) -> str:
+    """Return integer with correct ordinal suffix: 1st, 2nd, 3rd, 4th…"""
+    n = int(n)
+    if 11 <= (n % 100) <= 13:
+        return f"{n}th"
+    return f"{n}{['th', 'st', 'nd', 'rd', 'th'][min(n % 10, 4)]}"
+
+
 def _fmt(v, d=2, fallback='–'):
     if v is None:
         return fallback
@@ -173,7 +181,7 @@ def _build_data_summary(
         if key not in p or val is None:
             return ""
         r = percentile_rank(val, p[key], inverse=inverse)
-        return f"  ({int(r)}th pct)" if r is not None else ""
+        return f"  ({_ordinal(r)} pct)" if r is not None else ""
 
     lines = [
         f"CLUB REPORT — DATA SUMMARY",
@@ -298,7 +306,7 @@ def _build_prompt(
         if key not in p or val is None:
             return ''
         r = percentile_rank(val, p[key], inverse=inverse)
-        return f" ({int(r)}th pct)" if r is not None else ''
+        return f" ({_ordinal(r)} pct)" if r is not None else ''
 
     lines = [
         "You are an elite football analyst writing a transfer pitch for Beswicks Sports Management.\n",
@@ -457,6 +465,13 @@ ph = ph_raw[ph_raw['minutes_full_all'] >= 20].copy().sort_values('match_date').r
 
 club   = ph_raw['team_name'].iloc[0]      if ph_raw is not None and 'team_name'      in ph_raw.columns else ""
 pos    = ph_raw['position_group'].iloc[0] if ph_raw is not None and 'position_group' in ph_raw.columns else ""
+
+# Derive player's own league from Physical sheet competition_name (e.g. "ENG - League Two" → "League Two")
+player_league = ""
+if ph_raw is not None and 'competition_name' in ph_raw.columns:
+    _comp = ph_raw['competition_name'].dropna().mode()
+    if not _comp.empty:
+        player_league = _comp.iloc[0].replace("ENG - ", "").strip()
 short  = ph_raw['player_short_name'].iloc[0] if ph_raw is not None and 'player_short_name' in ph_raw.columns else selected_name
 
 season = get_season_totals(ws)
@@ -665,7 +680,7 @@ if _matched_name and ws_pos_key:
     if _squad_df is not None and not _squad_df.empty:
         # Build plain-text squad context for prompt injection
         _squad_lines = [f"  {row.get('Player','?')}: " + ", ".join(
-            f"{col} {row[col]:.1f}" if isinstance(row.get(col), float) else str(row.get(col, ""))
+            f"{col} {row[col]:.1f}" if pd.api.types.is_float(row.get(col)) or pd.api.types.is_integer(row.get(col)) else str(row.get(col, ""))
             for col in _squad_df.columns if col != "Player" and row.get(col) is not None
         ) for _, row in _squad_df.iterrows()]
         _squad_context = "\n".join(_squad_lines)
@@ -883,7 +898,7 @@ if (st.session_state.narrative and
                             radar_data[label] = pct_v
 
                     pdf_bytes = generate_pdf(
-                        name=selected_name, club=club, league=target_league or "", pos=pos,
+                        name=selected_name, club=club, league=player_league or target_league or "", pos=pos,
                         age_val=24,
                         date_start=date_start, date_end=date_end,
                         season=season, phys=phys,
