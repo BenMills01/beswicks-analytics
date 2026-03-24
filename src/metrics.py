@@ -622,6 +622,117 @@ _COMPARABLE_FEATURE_MAP: Dict[str, str] = {
     'Successful defensive actions per 90':'recoveries_p90',
 }
 
+# Per-position metric weights (peer file column name → weight multiplier).
+# Unspecified columns default to 1.0.
+# Higher weight = more influence on similarity distance.
+_POSITION_WEIGHTS: Dict[str, Dict[str, float]] = {
+    'Central Defender': {
+        'Aerial duels per 90':                3.0,
+        'Aerial duels won, %':                3.0,
+        'Defensive duels per 90':             3.0,
+        'Defensive duels won, %':             3.0,
+        'Interceptions per 90':               2.5,
+        'Successful defensive actions per 90':2.0,
+        'Passes per 90':                      1.5,
+        'Accurate passes, %':                 1.5,
+        'Duels won, %':                       1.5,
+        'Goals per 90':                       0.3,
+        'Assists per 90':                     0.3,
+        'Dribbles per 90':                    0.3,
+        'xG per 90':                          0.2,
+        'xA per 90':                          0.2,
+    },
+    'Full Back': {
+        'Crosses per 90':                     3.0,
+        'Progressive runs per 90':            2.5,
+        'Dribbles per 90':                    2.5,
+        'Accurate passes, %':                 2.0,
+        'Passes per 90':                      1.5,
+        'xA per 90':                          1.5,
+        'Assists per 90':                     1.5,
+        'Defensive duels per 90':             1.5,
+        'Defensive duels won, %':             1.5,
+        'Interceptions per 90':               1.5,
+        'Aerial duels per 90':                0.5,
+        'Aerial duels won, %':                0.5,
+        'Goals per 90':                       0.5,
+        'xG per 90':                          0.5,
+    },
+    'Central Mid': {
+        'Passes per 90':                      3.0,
+        'Accurate passes, %':                 2.5,
+        'Progressive runs per 90':            2.5,
+        'Successful defensive actions per 90':2.0,
+        'Interceptions per 90':               2.0,
+        'Duels won, %':                       1.5,
+        'xA per 90':                          1.5,
+        'Assists per 90':                     1.5,
+        'Defensive duels per 90':             1.5,
+        'Defensive duels won, %':             1.5,
+        'Aerial duels per 90':                0.5,
+        'Aerial duels won, %':                0.5,
+        'Goals per 90':                       1.0,
+        'xG per 90':                          1.0,
+    },
+    'Att Mid': {
+        'xA per 90':                          3.0,
+        'Assists per 90':                     2.5,
+        'Shot assists per 90':                2.5,
+        'Dribbles per 90':                    2.5,
+        'Progressive runs per 90':            2.5,
+        'xG per 90':                          2.0,
+        'Goals per 90':                       2.0,
+        'Accurate passes, %':                 1.5,
+        'Passes per 90':                      1.5,
+        'Defensive duels per 90':             0.3,
+        'Defensive duels won, %':             0.3,
+        'Aerial duels per 90':                0.3,
+        'Aerial duels won, %':                0.3,
+        'Interceptions per 90':               0.5,
+    },
+    'Wide Mid': {
+        'Crosses per 90':                     3.0,
+        'Dribbles per 90':                    2.5,
+        'Progressive runs per 90':            2.5,
+        'xA per 90':                          2.5,
+        'Assists per 90':                     2.0,
+        'Goals per 90':                       2.0,
+        'xG per 90':                          1.5,
+        'Accurate passes, %':                 1.5,
+        'Defensive duels per 90':             0.5,
+        'Defensive duels won, %':             0.5,
+        'Aerial duels per 90':                0.5,
+        'Aerial duels won, %':                0.5,
+        'Interceptions per 90':               0.5,
+    },
+    'Center Forward': {
+        'Goals per 90':                       3.0,
+        'xG per 90':                          3.0,
+        'Assists per 90':                     2.0,
+        'xA per 90':                          2.0,
+        'Dribbles per 90':                    1.5,
+        'Progressive runs per 90':            1.5,
+        'Duels won, %':                       1.5,
+        'Aerial duels per 90':                2.0,
+        'Aerial duels won, %':                2.0,
+        'Passes per 90':                      0.5,
+        'Accurate passes, %':                 0.5,
+        'Defensive duels per 90':             0.3,
+        'Defensive duels won, %':             0.3,
+        'Interceptions per 90':               0.3,
+    },
+    'Goalkeeper': {
+        # GK peer files use different columns — weights kept neutral
+        'Accurate passes, %':                 2.0,
+        'Passes per 90':                      2.0,
+        'Goals per 90':                       0.0,
+        'Assists per 90':                     0.0,
+        'xG per 90':                          0.0,
+        'xA per 90':                          0.0,
+        'Dribbles per 90':                    0.0,
+    },
+}
+
 # Columns shown in the output table (peer file names → display label)
 _COMPARABLE_DISPLAY_COLS: Dict[str, str] = {
     'Passes per 90':         'Pass p90',
@@ -646,7 +757,9 @@ def find_comparable_players(
     """
     Find the most statistically similar players to a client from the Wyscout peer group.
 
-    Uses z-score normalised Euclidean distance across a core set of per-90 metrics.
+    Uses position-weighted, z-score normalised Euclidean distance across a core set
+    of per-90 metrics. Weights are defined in _POSITION_WEIGHTS — metrics central
+    to the role receive 2–3x weight; irrelevant metrics receive 0.2–0.5x.
     Only features where both the peer file column and the client's totals value
     are available are included in the distance calculation.
 
@@ -738,7 +851,15 @@ def find_comparable_players(
     peer_norm   = (peer_feats - col_means) / col_stds
     client_norm = (client_vec - col_means.values) / col_stds.values
 
-    distances = np.sqrt(((peer_norm.values - client_norm) ** 2).sum(axis=1))
+    # Position-specific weights — default 1.0 for any column not listed
+    pos_weights = _POSITION_WEIGHTS.get(pos_key, {})
+    weight_vec  = np.array(
+        [pos_weights.get(c, 1.0) for c in feat_cols], dtype=float
+    )
+
+    # Weighted Euclidean distance: sqrt(sum(w * (peer - client)^2))
+    diff = peer_norm.values - client_norm
+    distances = np.sqrt((weight_vec * diff ** 2).sum(axis=1))
 
     df = df.copy()
     df['_dist']    = distances
