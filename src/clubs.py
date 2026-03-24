@@ -559,30 +559,31 @@ def get_style_fit_score(
         return percentile_rank(v, p[key])
 
     scores: dict[str, Optional[float]] = {}
-    ppda      = club_profile.get("avg_ppda")
-    possession = club_profile.get("avg_possession")
-    long_pass  = club_profile.get("avg_long_pass_pct")
+    ppda           = club_profile.get("avg_ppda")
+    play_style     = club_profile.get("play_style")      # "Direct" | "Balanced" | "Possession-based"
+    press_intensity = club_profile.get("press_intensity") # "High press" | "Moderate press" | "Low block"
 
     # ── 1. Out of possession ──────────────────────────────────────────────────
-    # Metrics selected by how the club defends — pressing, moderate, or low block
+    # Metrics selected by how the club defends — pressing intensity drives this
     if ppda is not None and ws_peers:
-        if ppda < 8:     # High press — energy, winning ball high up the pitch
+        if ppda < 8:     # High press — energy, winning the ball high
             pcts = [pr("interceptions_p90"), pr("recoveries_p90"), pr("def_duel_win")]
-        elif ppda < 12:  # Moderate — blend of defensive duels and interceptions
+        elif ppda < 12:  # Moderate — duels + interceptions
             pcts = [pr("def_duel_win"), pr("interceptions_p90"), pr("def_duels_p90")]
-        else:            # Low block — positional solidity, winning 1v1s in own half
+        else:            # Low block — positional solidity in own half
             pcts = [pr("def_duel_win"), pr("def_duels_p90"), pr("aerial_win")]
         valid = [p for p in pcts if p is not None]
         scores["out_of_possession"] = round(sum(valid) / len(valid)) if valid else None
 
     # ── 2. In possession ─────────────────────────────────────────────────────
-    # Metrics selected by how the club uses the ball
-    if possession is not None and ws_peers:
-        if possession > 55:                      # Possession-based — quality and volume
+    # Metrics selected by how the club uses the ball — play style drives this.
+    # Direct teams need aerial retention and distribution, not short passing.
+    if play_style is not None and ws_peers:
+        if play_style == "Possession-based":
             pcts = [pr("pass_acc"), pr("passes_p90"), pr("prog_runs_p90")]
-        elif long_pass and long_pass > 35:       # Direct — long ball, aerial retention
-            pcts = [pr("long_passes_p90"), pr("aerial_p90"), pr("duel_win")]
-        else:                                    # Balanced — accuracy + forward threat
+        elif play_style == "Direct":
+            pcts = [pr("long_passes_p90"), pr("aerial_p90"), pr("aerial_win")]
+        else:  # Balanced
             pcts = [pr("pass_acc"), pr("prog_runs_p90"), pr("dribbles_p90")]
         valid = [p for p in pcts if p is not None]
         scores["in_possession"] = round(sum(valid) / len(valid)) if valid else None
@@ -615,44 +616,34 @@ def get_style_fit_score(
         scores["physical_fit"] = round(sum(valid) / len(valid)) if valid else None
 
     # ── Overall — style-weighted average ─────────────────────────────────────
-    # Base weights: 25% each. Adjusted by club's pressing intensity and play style.
-    w = {"out_of_possession": 0.25, "in_possession": 0.25,
-         "gap_fill": 0.25, "physical_fit": 0.25}
+    # Explicit weight table keyed by (press_intensity, play_style).
+    # "In possession" weight drops sharply for direct teams — a CB who just
+    # wins it and launches it doesn't need to be a short-passer.
+    # fmt: off
+    _WEIGHTS: Dict[tuple, Dict[str, float]] = {
+        ("High press",    "Possession-based"): {"out": 0.35, "in": 0.35, "gap": 0.20, "phy": 0.10},
+        ("High press",    "Balanced"):         {"out": 0.40, "in": 0.20, "gap": 0.25, "phy": 0.15},
+        ("High press",    "Direct"):           {"out": 0.40, "in": 0.10, "gap": 0.25, "phy": 0.25},
+        ("Moderate press","Possession-based"): {"out": 0.25, "in": 0.40, "gap": 0.20, "phy": 0.15},
+        ("Moderate press","Balanced"):         {"out": 0.25, "in": 0.25, "gap": 0.25, "phy": 0.25},
+        ("Moderate press","Direct"):           {"out": 0.25, "in": 0.10, "gap": 0.30, "phy": 0.35},
+        ("Low block",     "Possession-based"): {"out": 0.20, "in": 0.35, "gap": 0.30, "phy": 0.15},
+        ("Low block",     "Balanced"):         {"out": 0.20, "in": 0.15, "gap": 0.35, "phy": 0.30},
+        ("Low block",     "Direct"):           {"out": 0.20, "in": 0.05, "gap": 0.35, "phy": 0.40},
+    }
+    # fmt: on
+    _w = _WEIGHTS.get((press_intensity, play_style),
+                      {"out": 0.25, "in": 0.25, "gap": 0.25, "phy": 0.25})
+    w = {
+        "out_of_possession": _w["out"],
+        "in_possession":     _w["in"],
+        "gap_fill":          _w["gap"],
+        "physical_fit":      _w["phy"],
+    }
 
-    if ppda is not None:
-        if ppda < 8:       # High press — out of possession most important
-            w["out_of_possession"] += 0.15
-            w["in_possession"]     -= 0.05
-            w["gap_fill"]          -= 0.05
-            w["physical_fit"]      -= 0.05
-        elif ppda > 12:    # Low block — physicality and gap fill trump pressing
-            w["out_of_possession"] -= 0.10
-            w["physical_fit"]      += 0.15
-            w["gap_fill"]          += 0.05
-            w["in_possession"]     -= 0.10
-
-    if possession is not None:
-        if possession > 55:                      # Possession — in possession critical
-            w["in_possession"]     += 0.15
-            w["out_of_possession"] -= 0.05
-            w["gap_fill"]          -= 0.05
-            w["physical_fit"]      -= 0.05
-        elif long_pass and long_pass > 35:       # Direct — physical over technique
-            w["physical_fit"]      += 0.10
-            w["in_possession"]     -= 0.10
-
-    # Clamp weights to [0, 1] and normalise so they always sum to 1
-    w = {k: max(0.0, v) for k, v in w.items()}
-    total_w = sum(w.values())
-    if total_w > 0:
-        w = {k: v / total_w for k, v in w.items()}
-
-    weighted = sum(
-        scores[k] * w[k]
-        for k in w
-        if scores.get(k) is not None
-    )
+    weighted = sum(scores[k] * w[k] for k in w if scores.get(k) is not None)
     active_w = sum(w[k] for k in w if scores.get(k) is not None)
+    # Renormalise in case some dimensions had no data
     scores["overall"] = round(weighted / active_w) if active_w > 0 else None
 
     return scores
