@@ -312,10 +312,9 @@ def generate_match_report(
     else:
         right_story = [Paragraph('Physical data not available for this match.', S_SMALL)]
 
-    # Wrap each side in its own Table cell for two-column layout
+    # Pass lists directly so ReportLab can split tall content across pages
     def _cell(items):
-        from reportlab.platypus import KeepTogether
-        return KeepTogether(items)
+        return items
 
     two_col = Table(
         [[_cell(left_story), Spacer(gap, 1), _cell(right_story)]],

@@ -525,7 +525,12 @@ def generate_pdf(
     log_rows   = [log_header]
 
     def sp(n, d):
-        return f"{int(round(n/d*100))}%" if d > 0 else "-"
+        try:
+            if pd.isna(n) or pd.isna(d) or d == 0:
+                return "-"
+            return f"{int(round(n / d * 100))}%"
+        except (TypeError, ValueError):
+            return "-"
 
     for _, r in ws.sort_values('Date', ascending=False).iterrows():
         row_data = [
