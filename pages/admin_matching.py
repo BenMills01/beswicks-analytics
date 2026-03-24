@@ -21,7 +21,7 @@ st.set_page_config(
 DATA_DIR       = "data"
 MATCHING_CSV    = os.path.join(DATA_DIR, "player_matching_l1_l2_2526.csv")
 OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
-PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
+PHYSICAL_CSV    = os.path.join(DATA_DIR, "physical_all_2526.csv")
 WYSCOUT_FILES  = [
     os.path.join(DATA_DIR, "League One min 874 mins.xlsx"),
     os.path.join(DATA_DIR, "League One Central Defenders.xlsx"),
@@ -222,7 +222,7 @@ with tab_fix:
     with col_f1:
         show_type = st.radio("Show", ["Both", "No match", "Low confidence"], horizontal=True)
     with col_f2:
-        league_filter = st.radio("League", ["Both", "League One", "League Two"], horizontal=True)
+        league_filter = st.radio("League", ["Both", "Championship", "League One", "League Two"], horizontal=True)
     with col_f3:
         hide_fixed = st.checkbox("Hide already overridden", value=True)
 

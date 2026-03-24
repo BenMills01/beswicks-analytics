@@ -66,8 +66,18 @@ BLUE     = '#3b82f6'
 
 DATA_DIR    = "data"
 PLAYERS_DIR = os.path.join(DATA_DIR, "players")
-PHYSICAL_CSV = os.path.join(DATA_DIR, "physical_l1_l2_2526.csv")
+PHYSICAL_CSV = os.path.join(DATA_DIR, "physical_all_2526.csv")
 WS_FILES = {
+    'Championship': {
+        'all':              os.path.join(DATA_DIR, "Championship 886 mins.xlsx"),
+        'Central Defender': os.path.join(DATA_DIR, "Championship Central Defenders.xlsx"),
+        'Full Back':        os.path.join(DATA_DIR, "Championship Full Back:Wing Back.xlsx"),
+        'Central Mid':      os.path.join(DATA_DIR, "Championship Central Midfielders.xlsx"),
+        'Att Mid':          os.path.join(DATA_DIR, "Championship Attacking Midfielders.xlsx"),
+        'Wide Mid':         os.path.join(DATA_DIR, "Championship Wide Midfielders.xlsx"),
+        'Center Forward':   os.path.join(DATA_DIR, "Championship CF's.xlsx"),
+        'Goalkeeper':       os.path.join(DATA_DIR, "Championship GKs.xlsx"),
+    },
     'League One': {
         'all':              os.path.join(DATA_DIR, "League One min 874 mins.xlsx"),
         'Central Defender': os.path.join(DATA_DIR, "League One Central Defenders.xlsx"),
@@ -385,7 +395,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Peer group filters")
     min_mins_peer = st.slider("Min minutes", 450, 1800, 900, 90)
-    peer_league   = st.radio("League", ["Both", "League One", "League Two"], horizontal=True)
+    peer_league   = st.radio("League", ["Both", "Championship", "League One", "League Two"], horizontal=True)
 
 # ── Load client A ─────────────────────────────────────────────────────────────
 with st.spinner(f"Loading {selected_name}..."):

@@ -409,7 +409,7 @@ def build_physical_peers(
     min_mins : int
         Minimum season minutes required for a player to be included as a peer.
     league_filter : str
-        'Both', 'League One', or 'League Two'.
+        'Both', 'Championship', 'League One', or 'League Two'.
 
     Returns
     -------
@@ -422,7 +422,9 @@ def build_physical_peers(
 
     df = phys_csv[phys_csv['quality_check'] == True].copy()
 
-    if league_filter == 'League One':
+    if league_filter == 'Championship':
+        df = df[df['competition_name'].str.contains('Championship', na=False)]
+    elif league_filter == 'League One':
         df = df[df['competition_name'].str.contains('League One', na=False)]
     elif league_filter == 'League Two':
         df = df[df['competition_name'].str.contains('League Two', na=False)]
@@ -473,7 +475,7 @@ def build_wyscout_peers(
     pos_key : str or None
         Position key (e.g. 'Central Defender') used to look up the correct file.
     league_filter : str
-        'Both', 'League One', or 'League Two'.
+        'Both', 'Championship', 'League One', or 'League Two'.
     min_mins : int
         Minimum minutes for a player to be included as a peer.
     ws_files : dict
@@ -490,6 +492,7 @@ def build_wyscout_peers(
         return {}, 0
 
     leagues = ['League One', 'League Two'] if league_filter == 'Both' else [league_filter]
+    # 'Both' covers L1/L2 only — Championship included when explicitly selected
     dfs = []
     for league in leagues:
         path = ws_files.get(league, {}).get(pos_key)
