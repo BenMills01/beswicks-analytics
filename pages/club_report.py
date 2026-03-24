@@ -471,23 +471,93 @@ if phys:
 else:
     season_combined = season
 
+# ── Club fit rankings ─────────────────────────────────────────────────────────
+st.markdown('<div class="section-header">Club fit rankings</div>', unsafe_allow_html=True)
+
+_all_profiles_rank, _all_medians_rank = _cached_all_profiles_and_medians()
+_club_scores: list[dict] = []
+for _cn, _cp in _all_profiles_rank.items():
+    if _cp.get("matches", 0) == 0:
+        continue
+    try:
+        _fs = get_style_fit_score(
+            season=season_combined,
+            phys=phys,
+            club_profile=_cp,
+            ws_peers=ws_peers,
+            phys_peers=phys_peers,
+            league_medians=_all_medians_rank,
+        )
+        if _fs.get("overall") is not None:
+            _club_scores.append({
+                "Club":      _cn,
+                "Formation": _cp.get("primary_formation", ""),
+                "Style":     " · ".join(filter(None, [_cp.get("press_intensity"), _cp.get("play_style")])),
+                "Overall":   _fs["overall"],
+                "Press":     _fs.get("press_fit"),
+                "Build-up":  _fs.get("buildup_fit"),
+                "Gap fill":  _fs.get("gap_fill"),
+                "Physical":  _fs.get("physical_fit"),
+            })
+    except Exception:
+        pass
+
+_club_scores.sort(key=lambda x: x["Overall"], reverse=True)
+
+if _club_scores:
+    _rank_df = pd.DataFrame(_club_scores[:10])
+    _rank_df.insert(0, "#", range(1, len(_rank_df) + 1))
+    st.dataframe(
+        _rank_df.style.format(
+            {c: lambda v: f"{int(v)}" if pd.notna(v) else "–"
+             for c in ["Overall", "Press", "Build-up", "Gap fill", "Physical"]}
+        ).background_gradient(
+            subset=["Overall"], cmap="RdYlGn", vmin=30, vmax=90
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(f"Scored across {len(_club_scores)} clubs · peer filter: {peer_league} · {min_mins_peer}+ mins")
+
+    # Quick-select: clicking a club from the top-10 pre-fills the target input
+    if "target_club_input" not in st.session_state:
+        st.session_state["target_club_input"] = ""
+    _top_names = [r["Club"] for r in _club_scores[:10]]
+    _qs_col, _btn_col = st.columns([3, 1])
+    with _qs_col:
+        _quick_pick = st.selectbox(
+            "Quick select from top 10",
+            options=[""] + _top_names,
+            label_visibility="collapsed",
+        )
+    with _btn_col:
+        if st.button("Use this club", use_container_width=True, disabled=not _quick_pick):
+            st.session_state["target_club_input"] = _quick_pick
+            st.rerun()
+else:
+    st.caption("No club profiles available — add Wyscout team stats files to data/clubs/")
+
 # ── Club context inputs ────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Target club</div>', unsafe_allow_html=True)
 
 available_clubs = _cached_club_list()
 _n_clubs = len(available_clubs)
 
+if "target_club_input" not in st.session_state:
+    st.session_state["target_club_input"] = ""
+
 col_a, col_b = st.columns(2)
 with col_a:
     target_club   = st.text_input(
         "Club name",
+        key="target_club_input",
         placeholder="e.g. Bristol City",
         help=f"{_n_clubs} club files available — start typing to auto-match" if _n_clubs else "No club files found in data/clubs/",
     )
     target_league = st.text_input("League / division", placeholder="e.g. Championship")
 
 if not target_club:
-    st.info("Enter the target club name to generate a report.")
+    st.info("Select a club from the rankings above or type a name to generate a report.")
     st.stop()
 
 # ── Auto-match club file ───────────────────────────────────────────────────────
