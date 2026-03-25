@@ -1061,3 +1061,156 @@ def find_comparable_players(
     result['Minutes'] = result['Minutes'].astype(int)
 
     return result
+
+
+def find_comparable_players_pca(
+    client_totals: Dict[str, float],
+    pos_key: Optional[str],
+    league_filter,
+    min_mins: int,
+    ws_files: Dict[str, Dict[str, str]],
+    top_n: int = 8,
+    client_name: str = "",
+) -> pd.DataFrame:
+    """
+    Find the most statistically similar players using PCA-based similarity.
+
+    Uses the same 16 curated Wyscout metrics as find_comparable_players() but
+    replaces weighted Euclidean distance with Euclidean distance in PCA space.
+    PCA decorrelates the feature set before measuring distance, so correlated
+    defensive metrics (aerial duels, defensive duels, interceptions) are
+    collapsed into a single axis rather than each contributing independently.
+
+    This produces 'profile' similarity — overall statistical likeness — rather
+    than role-fit similarity. Use this for the comparable players feature.
+    Use find_comparable_players() with weight_mode='role' for club-fit context.
+
+    Parameters
+    ----------
+    client_totals : dict
+        Season totals dict from get_season_totals() (or season_combined).
+    pos_key : str or None
+        Position key, e.g. 'Central Defender'.
+    league_filter : str or list
+        League selection — same format as find_comparable_players().
+    min_mins : int
+        Minimum season minutes for a peer player to be included.
+    ws_files : dict
+        Nested {league: {pos_key: path}} dict.
+    top_n : int
+        Number of most similar players to return.
+    client_name : str
+        Client's display name — excluded from the results.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: Player, Team, League, Minutes, Similarity, + key display cols.
+        Empty DataFrame if not enough data.
+    """
+    if not pos_key:
+        return pd.DataFrame()
+
+    if isinstance(league_filter, list):
+        leagues = league_filter
+    elif league_filter == 'Both':
+        leagues = ['League One', 'League Two']
+    elif league_filter == 'All':
+        leagues = ['Championship', 'League One', 'League Two']
+    else:
+        leagues = [league_filter]
+
+    dfs = []
+    for league in leagues:
+        path = ws_files.get(league, {}).get(pos_key)
+        if path and os.path.exists(path):
+            df = pd.read_excel(path)
+            df['_league'] = league
+            dfs.append(df)
+
+    if not dfs:
+        return pd.DataFrame()
+
+    df = pd.concat(dfs, ignore_index=True)
+    df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins].copy()
+
+    if client_name:
+        import unicodedata as _ud
+        def _ascii(s: str) -> str:
+            return _ud.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii').lower()
+        client_short = _ascii(client_name.split()[-1])
+        df = df[~df['Player'].apply(lambda x: client_short in _ascii(str(x)))]
+
+    if len(df) < MIN_PEER_N:
+        return pd.DataFrame()
+
+    use_map = {
+        peer_col: client_key
+        for peer_col, client_key in _COMPARABLE_FEATURE_MAP.items()
+        if peer_col in df.columns
+        and client_totals.get(client_key) is not None
+        and not pd.isna(client_totals.get(client_key, np.nan))
+    }
+
+    if len(use_map) < 4:
+        return pd.DataFrame()
+
+    feat_cols = list(use_map.keys())
+    peer_feats = df[feat_cols].apply(pd.to_numeric, errors='coerce')
+    peer_feats = peer_feats.dropna(thresh=max(4, len(feat_cols) // 2))
+    df = df.loc[peer_feats.index].reset_index(drop=True)
+    peer_feats = peer_feats.reset_index(drop=True)
+
+    col_means = peer_feats.mean()
+    peer_feats = peer_feats.fillna(col_means)
+
+    client_vec = np.array([client_totals[use_map[c]] for c in feat_cols], dtype=float)
+
+    # Z-score normalise using peer distribution
+    X      = peer_feats.values.astype(float)
+    means  = X.mean(axis=0)
+    stds   = X.std(axis=0)
+    stds[stds == 0] = 1.0
+    X_z    = (X - means) / stds
+    c_z    = (client_vec - means) / stds
+
+    # PCA via SVD — select components to capture 95% variance
+    try:
+        _U, S, Vt = np.linalg.svd(X_z, full_matrices=False)
+    except np.linalg.LinAlgError:
+        return pd.DataFrame()
+
+    var_ratio = (S ** 2) / (S ** 2).sum()
+    cumvar    = np.cumsum(var_ratio)
+    n_comp    = int(np.searchsorted(cumvar, 0.95)) + 1
+    n_comp    = min(n_comp, len(S), len(feat_cols), len(df))
+
+    components = Vt[:n_comp]
+    X_pca      = X_z @ components.T
+    c_pca      = c_z @ components.T
+
+    # Euclidean distance in PCA space (no position weights)
+    diff      = X_pca - c_pca
+    distances = np.sqrt((diff ** 2).sum(axis=1))
+
+    df = df.copy()
+    df['_dist'] = distances
+    df['_mins'] = pd.to_numeric(df['Minutes played'], errors='coerce')
+    df = df.dropna(subset=['_dist']).sort_values('_dist').reset_index(drop=True)
+
+    max_d = float(df['_dist'].max())
+    df['Similarity'] = (
+        ((1 - df['_dist'] / max_d) * 100).clip(0, 100).round(1)
+        if max_d > 0 else 100.0
+    )
+
+    display_cols = {c: lbl for c, lbl in _COMPARABLE_DISPLAY_COLS.items() if c in df.columns}
+    keep = ['Player', 'Team', '_league', '_mins', 'Similarity'] + list(display_cols.keys())
+    keep = [c for c in keep if c in df.columns]
+
+    result = df[keep].head(top_n).copy()
+    result = result.rename(columns={'_league': 'League', '_mins': 'Minutes'})
+    result = result.rename(columns=display_cols)
+    result['Minutes'] = result['Minutes'].astype(int)
+
+    return result

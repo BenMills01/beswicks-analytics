@@ -24,7 +24,7 @@ from src.clubs import (
 from src.metrics import (
     get_season_totals, get_physical_totals, build_match_log,
     build_physical_peers, build_wyscout_peers, build_physical_season_averages,
-    find_comparable_players,
+    find_comparable_players, find_comparable_players_pca,
     p90, pct, percentile_rank, parse_wyscout_label, parse_physical_label,
     MIN_PEER_N, CONF_THRESHOLD,
 )
@@ -760,7 +760,7 @@ _comparables_context = ""
 
 if ws_pos_key and season_combined:
     try:
-        _comparables_df = find_comparable_players(
+        _comparables_df = find_comparable_players_pca(
             client_totals=season_combined,
             pos_key=ws_pos_key,
             league_filter=peer_leagues,
@@ -768,8 +768,6 @@ if ws_pos_key and season_combined:
             ws_files=WS_FILES,
             top_n=8,
             client_name=selected_name,
-            client_phys=phys,
-            phys_season_avgs=_cached_phys_avgs(phys_csv),
         )
     except Exception as _ce:
         st.warning(f"Could not compute comparable players: {_ce}")
