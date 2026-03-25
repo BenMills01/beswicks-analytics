@@ -223,8 +223,11 @@ def _pca_comparables(
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins].copy()
 
     if client_name:
-        short = client_name.split()[-1]
-        df = df[~df['Player'].str.lower().str.contains(short.lower(), na=False)]
+        import unicodedata as _ud
+        def _ascii(s: str) -> str:
+            return _ud.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii').lower()
+        client_short = _ascii(client_name.split()[-1])
+        df = df[~df['Player'].apply(lambda x: client_short in _ascii(str(x)))]
 
     if len(df) < MIN_PEER_N:
         return pd.DataFrame(), {}

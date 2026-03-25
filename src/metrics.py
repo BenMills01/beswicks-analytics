@@ -957,11 +957,15 @@ def find_comparable_players(
     df = pd.concat(dfs, ignore_index=True)
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins].copy()
 
-    # Exclude the client player
+    # Exclude the client player — normalise to ASCII before comparing so that
+    # diacritics in peer file names (e.g. "Sørensen") match the master file
+    # spelling ("Sorensen") and the player is correctly excluded.
     if client_name:
-        # Try short name match (peer files use Wyscout short names)
-        client_short = client_name.split()[-1]  # last word as rough short name
-        df = df[~df['Player'].str.lower().str.contains(client_short.lower(), na=False)]
+        import unicodedata as _ud
+        def _ascii(s: str) -> str:
+            return _ud.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii').lower()
+        client_short = _ascii(client_name.split()[-1])
+        df = df[~df['Player'].apply(lambda x: client_short in _ascii(str(x)))]
 
     if len(df) < MIN_PEER_N:
         return pd.DataFrame()
