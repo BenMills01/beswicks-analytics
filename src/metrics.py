@@ -1071,6 +1071,8 @@ def find_comparable_players_pca(
     ws_files: Dict[str, Dict[str, str]],
     top_n: int = 8,
     client_name: str = "",
+    client_phys: Optional[Dict[str, float]] = None,
+    phys_season_avgs: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Find the most statistically similar players using PCA-based similarity.
@@ -1084,6 +1086,10 @@ def find_comparable_players_pca(
     This produces 'profile' similarity — overall statistical likeness — rather
     than role-fit similarity. Use this for the comparable players feature.
     Use find_comparable_players() with weight_mode='role' for club-fit context.
+
+    Optional physical blend: when client_phys and phys_season_avgs are supplied,
+    a physical distance (total dist, HSR, sprint dist, PSV99) is blended in at
+    the position-specific weight defined in _PHYS_BLEND (15–25%).
 
     Parameters
     ----------
@@ -1101,12 +1107,16 @@ def find_comparable_players_pca(
         Number of most similar players to return.
     client_name : str
         Client's display name — excluded from the results.
+    client_phys : dict or None
+        Physical metrics from get_physical_totals(). Pass None to skip blend.
+    phys_season_avgs : pd.DataFrame or None
+        Output of build_physical_season_averages(). Pass None to skip blend.
 
     Returns
     -------
     pd.DataFrame
-        Columns: Player, Team, League, Minutes, Similarity, + key display cols.
-        Empty DataFrame if not enough data.
+        Columns: Player, Team, League, Minutes, Similarity, _phys_matched,
+        + key display cols. Empty DataFrame if not enough data.
     """
     if not pos_key:
         return pd.DataFrame()
@@ -1193,9 +1203,22 @@ def find_comparable_players_pca(
     diff      = X_pca - c_pca
     distances = np.sqrt((diff ** 2).sum(axis=1))
 
+    # Physical blend — same as find_comparable_players()
+    phys_blend = _PHYS_BLEND.get(pos_key, 0.20) if (client_phys and phys_season_avgs is not None) else 0.0
+    phys_matched_flags: list = [False] * len(distances)
+    if phys_blend > 0:
+        distances, phys_matched_flags = _apply_physical_blend(
+            ws_distances=distances,
+            peer_names=df["Player"].tolist(),
+            client_phys=client_phys,
+            phys_season_avgs=phys_season_avgs,
+            phys_blend=phys_blend,
+        )
+
     df = df.copy()
-    df['_dist'] = distances
-    df['_mins'] = pd.to_numeric(df['Minutes played'], errors='coerce')
+    df['_dist']         = distances
+    df['_phys_matched'] = phys_matched_flags
+    df['_mins']         = pd.to_numeric(df['Minutes played'], errors='coerce')
     df = df.dropna(subset=['_dist']).sort_values('_dist').reset_index(drop=True)
 
     max_d = float(df['_dist'].max())
@@ -1205,7 +1228,7 @@ def find_comparable_players_pca(
     )
 
     display_cols = {c: lbl for c, lbl in _COMPARABLE_DISPLAY_COLS.items() if c in df.columns}
-    keep = ['Player', 'Team', '_league', '_mins', 'Similarity'] + list(display_cols.keys())
+    keep = ['Player', 'Team', '_league', '_mins', 'Similarity', '_phys_matched'] + list(display_cols.keys())
     keep = [c for c in keep if c in df.columns]
 
     result = df[keep].head(top_n).copy()
