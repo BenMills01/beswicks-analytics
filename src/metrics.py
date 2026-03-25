@@ -748,6 +748,11 @@ _POSITION_WEIGHTS: Dict[str, Dict[str, float]] = {
     },
 }
 
+# Profile-mode weights: near-flat across all positions.
+# Used when the goal is overall profile similarity (comparable players feature)
+# rather than role fit (club report). All unspecified metrics default to 1.0.
+_PROFILE_WEIGHTS: Dict[str, Dict[str, float]] = {}
+
 # Columns shown in the output table (peer file names → display label)
 _COMPARABLE_DISPLAY_COLS: Dict[str, str] = {
     'Passes per 90':           'Pass p90',
@@ -891,13 +896,20 @@ def find_comparable_players(
     client_name: str = "",
     client_phys: Optional[Dict[str, float]] = None,
     phys_season_avgs: Optional[pd.DataFrame] = None,
+    weight_mode: str = 'role',
 ) -> pd.DataFrame:
     """
     Find the most statistically similar players to a client from the Wyscout peer group.
 
     Primary signal: position-weighted, z-score normalised Euclidean distance across
-    Wyscout per-90 metrics (_COMPARABLE_FEATURE_MAP). Position weights in
-    _POSITION_WEIGHTS emphasise role-critical metrics 2–3x.
+    Wyscout per-90 metrics (_COMPARABLE_FEATURE_MAP).
+
+    Two weighting modes:
+    - 'role'    : _POSITION_WEIGHTS — emphasises role-critical metrics 2–3x.
+                  Use for club-fit context (club report).
+    - 'profile' : _PROFILE_WEIGHTS — near-flat (all 1.0), finds overall profile
+                  similarity regardless of positional emphasis.
+                  Use for comparable players feature.
 
     Optional physical blend: when client_phys and phys_season_avgs are supplied,
     a physical distance (total dist, HSR, sprint dist, PSV99) is blended in at
@@ -924,6 +936,8 @@ def find_comparable_players(
         Physical metrics from get_physical_totals().  Pass None to skip blend.
     phys_season_avgs : pd.DataFrame or None
         Output of build_physical_season_averages().  Pass None to skip blend.
+    weight_mode : str
+        'role' (default) or 'profile' — selects which weight table to use.
 
     Returns
     -------
@@ -1000,8 +1014,9 @@ def find_comparable_players(
     peer_norm   = (peer_feats - col_means) / col_stds
     client_norm = (client_vec - col_means.values) / col_stds.values
 
-    # Position-specific weights — default 1.0 for any column not listed
-    pos_weights = _POSITION_WEIGHTS.get(pos_key, {})
+    # Select weight table based on mode
+    _weight_table = _PROFILE_WEIGHTS if weight_mode == 'profile' else _POSITION_WEIGHTS
+    pos_weights = _weight_table.get(pos_key, {})
     weight_vec  = np.array(
         [pos_weights.get(c, 1.0) for c in feat_cols], dtype=float
     )

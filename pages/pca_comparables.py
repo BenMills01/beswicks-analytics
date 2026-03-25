@@ -583,6 +583,7 @@ with st.spinner("Computing comparables (3 methods)..."):
             client_name=selected_name,
             client_phys=phys,
             phys_season_avgs=_phys_avgs,
+            weight_mode='profile',
         )
         # Drop the _phys_matched helper column — not needed here
         current_df = current_df.drop(columns=['_phys_matched'], errors='ignore')
