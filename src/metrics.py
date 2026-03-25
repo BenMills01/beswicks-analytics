@@ -608,6 +608,11 @@ def build_wyscout_peers(
         return {}, 0
 
     df = pd.concat(dfs, ignore_index=True)
+    # Deduplicate by player name — keep the row with the most minutes
+    # (can occur when a player appears in both L1 and L2 files after a loan move)
+    if 'Player' in df.columns and 'Minutes played' in df.columns:
+        df['_mins_num'] = pd.to_numeric(df['Minutes played'], errors='coerce')
+        df = df.sort_values('_mins_num', ascending=False).drop_duplicates(subset=['Player']).drop(columns=['_mins_num'])
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins]
     if len(df) < MIN_PEER_N:
         return {}, 0
@@ -1056,6 +1061,10 @@ def find_comparable_players(
         return pd.DataFrame()
 
     df = pd.concat(dfs, ignore_index=True)
+    # Deduplicate by player name — keep the row with the most minutes
+    if 'Player' in df.columns and 'Minutes played' in df.columns:
+        df['_mins_num'] = pd.to_numeric(df['Minutes played'], errors='coerce')
+        df = df.sort_values('_mins_num', ascending=False).drop_duplicates(subset=['Player']).drop(columns=['_mins_num'])
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins].copy()
 
     # Exclude the client player — normalise to ASCII before comparing so that
@@ -1229,6 +1238,10 @@ def find_comparable_players_pca(
         return pd.DataFrame()
 
     df = pd.concat(dfs, ignore_index=True)
+    # Deduplicate by player name — keep the row with the most minutes
+    if 'Player' in df.columns and 'Minutes played' in df.columns:
+        df['_mins_num'] = pd.to_numeric(df['Minutes played'], errors='coerce')
+        df = df.sort_values('_mins_num', ascending=False).drop_duplicates(subset=['Player']).drop(columns=['_mins_num'])
     df = df[pd.to_numeric(df['Minutes played'], errors='coerce') >= min_mins].copy()
 
     if client_name:

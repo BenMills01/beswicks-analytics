@@ -17,7 +17,9 @@ import pytest
 
 from src.metrics import (
     find_comparable_players,
+    find_comparable_players_pca,
     get_season_totals,
+    compute_trajectory,
     ordinal,
     p90,
     pct,
@@ -371,3 +373,231 @@ def test_find_comparable_players_no_pos_key():
         ws_files=_WS_FILES,
     )
     assert result.empty
+
+
+@patch("os.path.exists", return_value=True)
+@patch("pandas.read_excel")
+def test_find_comparable_players_no_duplicates(mock_excel, mock_exists):
+    """
+    When the same player appears in both L1 and L2 peer files (e.g. after a
+    loan move), the result must contain that player at most once.
+    Regression test for the J. Arron Yates duplicate in Will Goodwin's output.
+    """
+    # Both L1 and L2 files contain "J. Arron Yates"
+    df_with_duplicate = _peer_df(18)
+    duplicate_row = df_with_duplicate.iloc[0].copy()
+    duplicate_row["Player"] = "J. Arron Yates"
+    duplicate_row["Minutes played"] = 1800
+    df_with_duplicate = pd.concat(
+        [df_with_duplicate, pd.DataFrame([duplicate_row])], ignore_index=True
+    )
+    mock_excel.return_value = df_with_duplicate
+
+    ws_files_both = {
+        "League One": {"Center Forward": "/fake/l1_cf.xlsx"},
+        "League Two": {"Center Forward": "/fake/l2_cf.xlsx"},
+    }
+    result = find_comparable_players(
+        client_totals=_CLIENT_TOTALS,
+        pos_key="Center Forward",
+        league_filter="Both",
+        min_mins=500,
+        ws_files=ws_files_both,
+        top_n=8,
+    )
+    counts = result["Player"].value_counts()
+    assert counts.max() <= 1, f"Duplicate player in results: {counts[counts > 1].index.tolist()}"
+
+
+@patch("os.path.exists", return_value=True)
+@patch("pandas.read_excel")
+def test_find_comparable_players_pca_no_duplicates(mock_excel, mock_exists):
+    """PCA variant also deduplicates when league_filter='Both'."""
+    df_with_duplicate = _peer_df(18)
+    duplicate_row = df_with_duplicate.iloc[0].copy()
+    duplicate_row["Player"] = "J. Arron Yates"
+    df_with_duplicate = pd.concat(
+        [df_with_duplicate, pd.DataFrame([duplicate_row])], ignore_index=True
+    )
+    mock_excel.return_value = df_with_duplicate
+
+    ws_files_both = {
+        "League One": {"Center Forward": "/fake/l1_cf.xlsx"},
+        "League Two": {"Center Forward": "/fake/l2_cf.xlsx"},
+    }
+    result = find_comparable_players_pca(
+        client_totals=_CLIENT_TOTALS,
+        pos_key="Center Forward",
+        league_filter="Both",
+        min_mins=500,
+        ws_files=ws_files_both,
+        top_n=8,
+    )
+    counts = result["Player"].value_counts()
+    assert counts.max() <= 1, f"Duplicate player in PCA results: {counts[counts > 1].index.tolist()}"
+
+
+# ── compute_trajectory ────────────────────────────────────────────────────────
+
+def _make_traj_df(recent_goals: float, prev_goals: float, window: int = 8) -> pd.DataFrame:
+    """Build a Wyscout-shaped DataFrame with two distinct performance windows."""
+    n = window * 2
+    goals = [prev_goals] * window + [recent_goals] * window
+    return pd.DataFrame({
+        "Date":           pd.date_range("2024-08-01", periods=n, freq="7D"),
+        "Minutes played": [90.0] * n,
+        "Goals":          goals,
+    })
+
+
+def test_compute_trajectory_up():
+    """Player doubling their goal rate → direction 'up'."""
+    df = _make_traj_df(prev_goals=0.5, recent_goals=1.0)
+    result = compute_trajectory(df, "Goals")
+    assert result is not None
+    assert result["direction"] == "up"
+    assert result["symbol"] == "↑"
+    assert result["pct_change"] > 0
+
+
+def test_compute_trajectory_down():
+    """Player halving their goal rate → direction 'down'."""
+    df = _make_traj_df(prev_goals=1.0, recent_goals=0.3)
+    result = compute_trajectory(df, "Goals")
+    assert result is not None
+    assert result["direction"] == "down"
+    assert result["symbol"] == "↓"
+    assert result["pct_change"] < 0
+
+
+def test_compute_trajectory_flat():
+    """Consistent output within threshold → direction 'flat'."""
+    df = _make_traj_df(prev_goals=0.5, recent_goals=0.51)
+    result = compute_trajectory(df, "Goals")
+    assert result is not None
+    assert result["direction"] == "flat"
+    assert result["symbol"] == "→"
+
+
+def test_compute_trajectory_missing_col_returns_none():
+    """Non-existent column → None, not an exception."""
+    df = _make_traj_df(0.5, 1.0)
+    assert compute_trajectory(df, "NonExistent") is None
+
+
+def test_compute_trajectory_too_few_matches_returns_none():
+    """Fewer than min_total_matches rows → None."""
+    df = pd.DataFrame({
+        "Minutes played": [90.0] * 4,
+        "Goals":          [1.0, 0.0, 1.0, 0.0],
+    })
+    assert compute_trajectory(df, "Goals") is None
+
+
+def test_compute_trajectory_per_90_normalised():
+    """Trajectory compares per-90 rates, not raw counts — different minutes handled."""
+    # Recent window: 4 goals in 360 mins = 1.0 per 90
+    # Prev window:   4 goals in 720 mins = 0.5 per 90 → direction should be up
+    recent = pd.DataFrame({
+        "Date":           pd.date_range("2025-01-01", periods=8, freq="7D"),
+        "Minutes played": [45.0] * 8,   # 45 mins each = 360 total
+        "Goals":          [0.5] * 8,    # 4 goals total
+    })
+    prev = pd.DataFrame({
+        "Date":           pd.date_range("2024-08-01", periods=8, freq="7D"),
+        "Minutes played": [90.0] * 8,   # 90 mins each = 720 total
+        "Goals":          [0.5] * 8,    # 4 goals total
+    })
+    df = pd.concat([prev, recent], ignore_index=True)
+    result = compute_trajectory(df, "Goals")
+    assert result is not None
+    assert result["direction"] == "up"
+
+
+# ── Integration tests (require real data files) ───────────────────────────────
+# These tests load actual files from data/ and verify the full pipeline.
+# They are skipped automatically if the data directory is not present
+# (e.g. in CI without the data repo).
+
+import glob as _glob
+import os as _os
+
+_DATA_PLAYERS = _os.path.join("data", "players")
+_HAS_DATA     = _os.path.isdir(_DATA_PLAYERS) and bool(_glob.glob(_os.path.join(_DATA_PLAYERS, "*.xlsx")))
+
+pytestmark_integration = pytest.mark.skipif(
+    not _HAS_DATA,
+    reason="data/players/ not found — skipping integration tests",
+)
+
+
+@pytest.mark.skipif(not _HAS_DATA, reason="data/players/ not present")
+def test_integration_get_season_totals_real_file():
+    """
+    Load the first available master XLSX and verify get_season_totals() returns
+    a dict with all expected keys and sensible values.
+    """
+    files = sorted(_glob.glob(_os.path.join(_DATA_PLAYERS, "*.xlsx")))
+    path  = files[0]
+    df    = pd.read_excel(path, sheet_name="Wyscout")
+    ws    = df[df["Minutes played"] >= 20].copy()
+
+    result = get_season_totals(ws)
+
+    # Required keys
+    required = {
+        "mins", "matches", "goals_raw", "assists_raw", "goals_p90", "assists_p90",
+        "xg_p90", "xa_p90", "passes_p90", "pass_acc", "duels_p90", "duel_win",
+        "aerial_p90", "aerial_win", "def_duels_p90", "def_duel_win",
+        "interceptions_p90", "recoveries_p90", "losses_p90", "yellow", "red",
+    }
+    missing = required - set(result.keys())
+    assert not missing, f"get_season_totals missing keys: {missing}"
+
+    # Sanity bounds
+    assert result["mins"] > 0, "Total minutes must be positive"
+    assert result["matches"] >= 1
+    assert 0 <= (result["pass_acc"] or 0) <= 100, "Pass accuracy must be 0–100"
+    assert 0 <= (result["duel_win"] or 0) <= 100
+
+
+@pytest.mark.skipif(not _HAS_DATA, reason="data/players/ not present")
+def test_integration_season_totals_no_iloc_drift():
+    """
+    Verify iloc positions haven't drifted in real Wyscout exports.
+    iloc[13] must return a value that makes pass_acc plausible (between 0 and 100%).
+    """
+    files = sorted(_glob.glob(_os.path.join(_DATA_PLAYERS, "*.xlsx")))
+    for path in files[:3]:  # check first 3 clients
+        df = pd.read_excel(path, sheet_name="Wyscout")
+        ws = df[df["Minutes played"] >= 20].copy()
+        if ws.empty or ws.shape[1] < 41:
+            continue
+        result = get_season_totals(ws)
+        acc = result.get("pass_acc")
+        assert acc is None or 0 <= acc <= 100, (
+            f"pass_acc out of range in {path}: {acc} — "
+            "check if Wyscout export added a column before iloc[13]"
+        )
+        assert result.get("yellow", 0) >= 0
+        assert result.get("red", 0) >= 0
+
+
+@pytest.mark.skipif(not _HAS_DATA, reason="data/players/ not present")
+def test_integration_compute_trajectory_real_file():
+    """
+    compute_trajectory() on a real Wyscout sheet either returns a valid dict
+    or None — never raises an exception.
+    """
+    files = sorted(_glob.glob(_os.path.join(_DATA_PLAYERS, "*.xlsx")))
+    path  = files[0]
+    df    = pd.read_excel(path, sheet_name="Wyscout")
+    ws    = df[df["Minutes played"] >= 20].copy()
+
+    for col in ["Goals", "xG", "Passes", "Duels"]:
+        result = compute_trajectory(ws, col)
+        assert result is None or (
+            isinstance(result, dict)
+            and result["direction"] in ("up", "down", "flat")
+            and result["symbol"] in ("↑", "↓", "→")
+        ), f"Unexpected trajectory result for {col}: {result}"
