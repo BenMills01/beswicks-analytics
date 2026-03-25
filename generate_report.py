@@ -230,6 +230,7 @@ def generate_pdf(
     weaknesses: list = None,
     squad_df=None,
     fit_score: dict = None,
+    comparable_df=None,
 ):
     """
     Build and return the PDF as bytes.
@@ -715,6 +716,73 @@ def generate_pdf(
             for para in narrative_text.strip().split('\n\n'):
                 if para.strip():
                     story.append(Paragraph(para.strip().replace('\n', ' '), S_NARRATIVE))
+
+    # ── Comparable players page ────────────────────────────────────────────────
+    import pandas as _pd
+    if comparable_df is not None and not comparable_df.empty:
+        story.append(PageBreak())
+        story.append(Paragraph("COMPARABLE PLAYERS", S_SECTION))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=GREY2, spaceAfter=6))
+
+        # Caption line
+        _phys_n = int(comparable_df.get('_phys_matched', _pd.Series(dtype=bool)).sum()) \
+            if '_phys_matched' in comparable_df.columns else 0
+        _phys_note = f" · {_phys_n} with physical blend (+)" if _phys_n else ""
+        story.append(Paragraph(
+            f"PCA profile similarity · {pos or 'Position'} · Top {len(comparable_df)} peers{_phys_note}",
+            S_SMALL,
+        ))
+        story.append(Spacer(1, 8))
+
+        # Choose stat columns — prefer this order, take what's present
+        _pref_stats = ['xG p90', 'Goals p90', 'Pass%', 'Duel%', 'Aerial%', 'Def%', 'Pass p90', 'Int p90']
+        _stat_cols  = [c for c in _pref_stats if c in comparable_df.columns][:5]
+
+        # Build header
+        _comp_hdrs = ['Player', 'Team', 'League', 'Mins', 'Sim'] + _stat_cols
+        _comp_header_row = [
+            Paragraph(h, _style(f'cph{i}', fontSize=6.5, textColor=GOLD, fontName='Helvetica-Bold'))
+            for i, h in enumerate(_comp_hdrs)
+        ]
+        _comp_rows = [_comp_header_row]
+
+        for _, r in comparable_df.iterrows():
+            _phys_flag = '+' if r.get('_phys_matched', False) else ''
+            _sim_val   = r.get('Similarity', 0)
+            _sim_col   = pct_colour(_sim_val)
+            _sim_hex   = '#{:02x}{:02x}{:02x}'.format(
+                int(_sim_col.red * 255), int(_sim_col.green * 255), int(_sim_col.blue * 255))
+            _row = [
+                Paragraph(str(r.get('Player', ''))[:26], _style('cpn', fontSize=7.5, textColor=LGREY)),
+                Paragraph(str(r.get('Team',   ''))[:20], _style('cpt', fontSize=7.0, textColor=LGREY)),
+                Paragraph(str(r.get('League', ''))[:12], _style('cpl', fontSize=7.0, textColor=GREY3)),
+                Paragraph(str(int(r.get('Minutes', 0))), _style('cpm', fontSize=7.0, textColor=GREY3)),
+                Paragraph(
+                    f'<font color="{_sim_hex}"><b>{_sim_val:.0f}</b></font>'
+                    f'<font size="6" color="#444">{_phys_flag}</font>',
+                    _style('cps', fontSize=7.5, textColor=LGREY),
+                ),
+            ]
+            for sc in _stat_cols:
+                _v = r.get(sc)
+                if _v is None or (_pd.isna(_v) if not isinstance(_v, str) else False):
+                    _row.append(Paragraph('–', _style('cpv', fontSize=7.0, textColor=GREY3)))
+                else:
+                    _row.append(Paragraph(f'{float(_v):.1f}', _style('cpv', fontSize=7.0, textColor=LGREY)))
+            _comp_rows.append(_row)
+
+        _avail_w   = W - 2 * MARGIN
+        _n_stats   = len(_stat_cols)
+        _stat_w    = _avail_w * 0.07
+        _fixed_w   = _avail_w - _n_stats * _stat_w
+        _col_widths = [
+            _fixed_w * 0.35,   # Player
+            _fixed_w * 0.28,   # Team
+            _fixed_w * 0.18,   # League
+            _fixed_w * 0.09,   # Mins
+            _fixed_w * 0.10,   # Sim
+        ] + [_stat_w] * _n_stats
+        story.append(dark_table(_comp_rows, _col_widths, header=True))
 
     # ── Build ─────────────────────────────────────────────────────────────────
     doc.build(story, onFirstPage=_draw_bg, onLaterPages=_draw_bg)

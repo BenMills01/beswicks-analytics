@@ -14,6 +14,7 @@ from src.metrics import (
     parse_wyscout_label, parse_physical_label,
     get_season_totals, get_physical_totals, build_match_log,
     build_physical_peers, build_wyscout_peers, build_physical_season_averages,
+    compute_trajectory, find_comparable_players_pca,
     METRIC_DESC, MIN_PEER_N, CONF_THRESHOLD,
 )
 
@@ -136,7 +137,7 @@ OVERRIDES_CSV   = os.path.join(DATA_DIR, "matching_overrides.csv")
 # CONF_THRESHOLD imported from src.metrics
 
 # ── UI helpers (app.py-only — not shared) ─────────────────────────────────────
-def metric_card(label, value, sub='', vcls='', pct_val=None, peer_n=None):
+def metric_card(label, value, sub='', vcls='', pct_val=None, peer_n=None, trajectory=None):
     pct_section = ''
     if pct_val is not None:
         c  = pct_colour(pct_val)
@@ -149,12 +150,17 @@ def metric_card(label, value, sub='', vcls='', pct_val=None, peer_n=None):
     desc      = METRIC_DESC.get(label, '')
     desc_html = f'<div class="mc-desc" title="{desc}">ⓘ</div>' if desc else ''
     sub_html  = f'<div class="mc-sub">{sub}</div>' if sub else ''
+    traj_html = ''
+    if trajectory:
+        traj_col  = '#4ade80' if trajectory['direction'] == 'up' else ('#f87171' if trajectory['direction'] == 'down' else '#555')
+        sign      = '+' if trajectory['pct_change'] > 0 else ''
+        traj_html = f'<div class="mc-sub" style="color:{traj_col};font-size:0.68rem">{trajectory["symbol"]} {sign}{trajectory["pct_change"]:.0f}% vs prev 8</div>'
     return (
         f'<div class="mc {vcls}">'
         f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
         f'<div class="mc-label">{label}</div>{desc_html}</div>'
         f'<div class="mc-value">{value}</div>'
-        f'{sub_html}{pct_section}</div>'
+        f'{sub_html}{traj_html}{pct_section}</div>'
     )
 
 def metric_row(cards_html):
@@ -541,6 +547,12 @@ with c2:
     else:
         st.markdown('<div class="peer-banner peer-banner-warn">⚠ Wyscout peer group unavailable — try relaxing filters</div>', unsafe_allow_html=True)
 
+# ── Trajectory indicators (last 8 vs previous 8 matches, per-90) ──────────────
+_traj_goals   = compute_trajectory(ws, 'Goals')
+_traj_xg      = compute_trajectory(ws, 'xG')
+_traj_passes  = compute_trajectory(ws, 'Passes')
+_traj_duels   = compute_trajectory(ws, 'Duels')
+
 # ── Seasonal metrics ──────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Seasonal metrics · per 90</div>', unsafe_allow_html=True)
 
@@ -556,9 +568,9 @@ if phys:
 
 st.markdown("**Attacking output**")
 st.markdown(metric_row([
-    metric_card("Goals p90",     f"{season['goals_p90']:.2f}",     f"{season['goals_raw']} raw",  "mc-good" if season['goals_raw']>=2 else "",       gp('goals_p90',     season.get('goals_p90')),     ws_peer_n),
+    metric_card("Goals p90",     f"{season['goals_p90']:.2f}",     f"{season['goals_raw']} raw",  "mc-good" if season['goals_raw']>=2 else "",       gp('goals_p90',     season.get('goals_p90')),     ws_peer_n, trajectory=_traj_goals),
     metric_card("Assists p90",   f"{season['assists_p90']:.2f}",   f"{season['assists_raw']} raw","",                                                 gp('assists_p90',   season.get('assists_p90')),   ws_peer_n),
-    metric_card("xG p90",        f"{season['xg_p90']:.2f}",        "",                            "",                                                 gp('xg_p90',        season.get('xg_p90')),        ws_peer_n),
+    metric_card("xG p90",        f"{season['xg_p90']:.2f}",        "",                            "",                                                 gp('xg_p90',        season.get('xg_p90')),        ws_peer_n, trajectory=_traj_xg),
     metric_card("xA p90",        f"{season['xa_p90']:.2f}",        "",                            "",                                                 gp('xa_p90',        season.get('xa_p90')),        ws_peer_n),
     metric_card("Shot asts p90", f"{season['shot_asts_p90']:.2f}", "",                            "mc-good" if season['shot_asts_p90']>0.5 else "",   gp('shot_asts_p90', season.get('shot_asts_p90')), ws_peer_n),
     metric_card("Touches in box",f"{season['touches_box_p90']:.2f}","per 90",                    "",                                                 gp('touches_box_p90',season.get('touches_box_p90')),ws_peer_n),
@@ -567,7 +579,7 @@ st.markdown(metric_row([
 st.markdown("**Passing & ball-carrying**")
 pa = season['pass_acc']
 st.markdown(metric_row([
-    metric_card("Passes p90",    f"{season['passes_p90']:.1f}",     f"{pa:.1f}% accuracy" if pa else "",                   "mc-good" if pa and pa>80 else "mc-warn" if pa and pa>70 else "mc-bad", gp('passes_p90',    season.get('passes_p90')),    ws_peer_n),
+    metric_card("Passes p90",    f"{season['passes_p90']:.1f}",     f"{pa:.1f}% accuracy" if pa else "",                   "mc-good" if pa and pa>80 else "mc-warn" if pa and pa>70 else "mc-bad", gp('passes_p90',    season.get('passes_p90')),    ws_peer_n, trajectory=_traj_passes),
     metric_card("Long pass p90", f"{season['long_passes_p90']:.2f}",f"{season['lp_acc']:.1f}% acc" if season['lp_acc'] else "","",                                                                  gp('long_passes_p90',season.get('long_passes_p90')),ws_peer_n),
     metric_card("Crosses p90",   f"{season['crosses_p90']:.2f}",    "",                                                     "",                                                                      gp('crosses_p90',   season.get('crosses_p90')),   ws_peer_n),
     metric_card("Dribbles p90",  f"{season['dribbles_p90']:.2f}",   f"{season['drib_pct']:.1f}% success" if season['drib_pct'] else "","mc-good" if season['drib_pct'] and season['drib_pct']>60 else "",gp('dribbles_p90',season.get('dribbles_p90')),ws_peer_n),
@@ -576,7 +588,7 @@ st.markdown(metric_row([
 
 st.markdown("**Defensive output**")
 st.markdown(metric_row([
-    metric_card("Duels p90",      f"{season['duels_p90']:.1f}",       f"{season['duel_win']:.1f}% win rate",                    "mc-warn" if season['duel_win'] and season['duel_win']<55 else "mc-good",       gp('duels_p90',      season.get('duels_p90')),       ws_peer_n),
+    metric_card("Duels p90",      f"{season['duels_p90']:.1f}",       f"{season['duel_win']:.1f}% win rate",                    "mc-warn" if season['duel_win'] and season['duel_win']<55 else "mc-good",       gp('duels_p90',      season.get('duels_p90')),       ws_peer_n, trajectory=_traj_duels),
     metric_card("Aerial p90",     f"{season['aerial_p90']:.2f}",      f"{season['aerial_win']:.1f}% win rate" if season['aerial_win'] else "","",                                                                  gp('aerial_p90',     season.get('aerial_p90')),      ws_peer_n),
     metric_card("Def duels p90",  f"{season['def_duels_p90']:.2f}",   f"{season['def_duel_win']:.1f}% win rate" if season['def_duel_win'] else "","mc-warn" if season['def_duel_win'] and season['def_duel_win']<60 else "mc-good",gp('def_duels_p90',season.get('def_duels_p90')),ws_peer_n),
     metric_card("Interceptions",  f"{season['interceptions_p90']:.2f}","per 90",                                                "mc-good" if season['interceptions_p90']>4 else "",                              gp('interceptions_p90',season.get('interceptions_p90')),ws_peer_n),
@@ -901,6 +913,22 @@ if 'export_btn' in dir() and export_btn:
                     ph['hsr_p90_m']    = ph.apply(lambda r: p90(r['hsr_distance_full_all'],    r['minutes_full_all']), axis=1)
                     ph['sprint_p90_m'] = ph.apply(lambda r: p90(r['sprint_distance_full_all'], r['minutes_full_all']), axis=1)
 
+                # Comparable players for PDF (best-effort — non-fatal if it fails)
+                try:
+                    _comp_df = find_comparable_players_pca(
+                        client_totals=season,
+                        pos_key=ws_pos_key,
+                        league_filter=peer_league,
+                        min_mins=min_mins_peer,
+                        ws_files=WS_FILES,
+                        top_n=8,
+                        client_name=short_name or name,
+                        client_phys=phys,
+                        phys_season_avgs=phys_avgs,
+                    )
+                except Exception:
+                    _comp_df = None
+
                 pdf_bytes = generate_pdf(
                     name=name, club=club, league=league, pos=pos, age_val=age_val,
                     date_start=date_start, date_end=date_end,
@@ -911,6 +939,7 @@ if 'export_btn' in dir() and export_btn:
                     ws_peer_n=ws_peer_n, phys_peer_n=phys_peer_n,
                     peer_desc=peer_desc,
                     audience=report_audience.lower(),
+                    comparable_df=_comp_df,
                 )
                 filename = f"Beswicks_{name.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
                 st.download_button(

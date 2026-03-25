@@ -138,6 +138,93 @@ def rolling_avg(series: pd.Series, window: int = 5) -> pd.Series:
     return pd.Series(series).rolling(window=window, min_periods=3).mean()
 
 
+def compute_trajectory(
+    ws: pd.DataFrame,
+    metric_col: str,
+    window: int = 8,
+    flat_threshold: float = 0.05,
+    min_total_matches: int = 6,
+) -> Optional[dict]:
+    """
+    Compare the per-90 average of *metric_col* in the most recent *window*
+    matches against the previous *window* matches.
+
+    Parameters
+    ----------
+    ws : pd.DataFrame
+        Wyscout match DataFrame, already filtered to >= MIN_MATCH_MINS.
+        Sorted by Date ascending if possible.
+    metric_col : str
+        Named Wyscout column to analyse (e.g. 'Goals', 'xG', 'Passes').
+    window : int
+        Matches in each comparison window (default 8).
+    flat_threshold : float
+        Relative change below which the metric is considered flat (default 5%).
+    min_total_matches : int
+        Minimum qualifying matches required before returning a result.
+
+    Returns
+    -------
+    dict or None
+        direction : 'up' | 'down' | 'flat'
+        symbol    : '↑' | '↓' | '→'
+        recent_avg: per-90 rate in the recent window
+        prev_avg  : per-90 rate in the previous window
+        pct_change: % relative change (positive = improvement)
+    """
+    if metric_col not in ws.columns or 'Minutes played' not in ws.columns:
+        return None
+
+    cols = ['Minutes played', metric_col]
+    if 'Date' in ws.columns:
+        cols = ['Date'] + cols
+
+    df = ws[cols].copy().dropna(subset=['Minutes played', metric_col])
+
+    if 'Date' in df.columns:
+        try:
+            df = df.sort_values('Date').reset_index(drop=True)
+        except Exception:
+            pass
+
+    if len(df) < min_total_matches:
+        return None
+
+    recent = df.tail(window)
+    prev   = df.iloc[max(0, len(df) - 2 * window): len(df) - window]
+
+    if len(recent) < 3 or len(prev) < 3:
+        return None
+
+    def _p90_window(subset: pd.DataFrame) -> float:
+        total_mins = subset['Minutes played'].sum()
+        return 0.0 if total_mins == 0 else (subset[metric_col].sum() / total_mins) * 90
+
+    recent_avg = _p90_window(recent)
+    prev_avg   = _p90_window(prev)
+
+    if prev_avg == 0:
+        pct_change = 0.0
+        direction  = 'flat'
+    else:
+        rel_change = (recent_avg - prev_avg) / abs(prev_avg)
+        if rel_change > flat_threshold:
+            direction = 'up'
+        elif rel_change < -flat_threshold:
+            direction = 'down'
+        else:
+            direction = 'flat'
+        pct_change = rel_change * 100
+
+    return {
+        'direction':   direction,
+        'symbol':      {'up': '↑', 'down': '↓', 'flat': '→'}[direction],
+        'recent_avg':  round(recent_avg, 2),
+        'prev_avg':    round(prev_avg, 2),
+        'pct_change':  round(pct_change, 1),
+    }
+
+
 def mins_to_opacity(
     minutes_series: pd.Series,
     lo: float = 0.3,
