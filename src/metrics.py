@@ -697,7 +697,6 @@ def build_wyscout_peers(
         'recoveries_p90':      ser('Successful defensive actions per 90'),
         'fouls_p90':           ser('Fouls per 90'),
         # Peer-file-only metrics (not in match-by-match export)
-        'accels_p90':          ser('Accelerations per 90'),
         'key_passes_p90':      ser('Key passes per 90'),
         'smart_passes_p90':    ser('Smart passes per 90'),
         'smart_pass_acc':      ser('Accurate smart passes, %'),

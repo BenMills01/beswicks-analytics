@@ -466,7 +466,7 @@ if pos_file_override and pos_file_override != "Auto-detect":
     ws_pos_key = pos_file_override
 
 # Defaults for peer-file-only metrics (populated below if player is found in league file)
-for _k in ('accels_p90','key_passes_p90','smart_passes_p90','smart_pass_acc',
+for _k in ('key_passes_p90','smart_passes_p90','smart_pass_acc',
            'third_asts_p90','deep_comp_p90','deep_crosses_p90','prog_passes_p90',
            'prog_pass_acc','lat_passes_p90','lat_pass_acc','avg_pass_length',
            'recv_lp_p90','padj_interceptions','padj_slide_tackles','shots_blocked_p90'):
@@ -499,7 +499,6 @@ if ws_pos_key and short_name:
             if _lf('Successful defensive actions per 90') is not None:
                 season['recoveries_p90'] = _lf('Successful defensive actions per 90')
             # Supplement season dict with metrics only available in the league-wide file
-            season['accels_p90']        = _lf('Accelerations per 90')
             season['key_passes_p90']    = _lf('Key passes per 90')
             season['smart_passes_p90']  = _lf('Smart passes per 90')
             season['smart_pass_acc']    = _lf('Accurate smart passes, %')
@@ -606,10 +605,6 @@ with _tab["Attacking"]:
         metric_card("Prog runs p90",  f"{season['prog_runs_p90']:.2f}",  "",                             "",                                               gp('prog_runs_p90',  season.get('prog_runs_p90')),  ws_peer_n),
         metric_card("Fouls suffered", f"{season.get('fouls_suffered_p90', 0):.2f}", "per 90",            "",                                               gp('fouls_suffered_p90', season.get('fouls_suffered_p90')), ws_peer_n),
     ]), unsafe_allow_html=True)
-    if season.get('accels_p90') is not None:
-        st.markdown(metric_row([
-            metric_card("Accelerations", f"{season['accels_p90']:.2f}", "per 90", "", gp('accels_p90', season.get('accels_p90')), ws_peer_n),
-        ]), unsafe_allow_html=True)
 
 # ── Passing tab ────────────────────────────────────────────────────────────────
 with _tab["Passing"]:
