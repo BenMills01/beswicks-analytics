@@ -760,14 +760,16 @@ if ws_peer_n >= 5:
 
 # ── Physical charts ───────────────────────────────────────────────────────────
 if ph is not None and len(ph) > 0:
-    st.markdown('<div class="section-header">Physical output · match by match</div>', unsafe_allow_html=True)
-    ph['match_label']  = ph.apply(lambda r: parse_physical_label(r['match_name'], r['team_name']), axis=1)
-    ph['dist_p90_m']   = ph.apply(lambda r: p90(r['total_distance_full_all'],  r['minutes_full_all']), axis=1)
-    ph['hsr_p90_m']    = ph.apply(lambda r: p90(r['hsr_distance_full_all'],    r['minutes_full_all']), axis=1)
-    ph['sprint_p90_m'] = ph.apply(lambda r: p90(r['sprint_distance_full_all'], r['minutes_full_all']), axis=1)
-    ph_mins = ph['minutes_full_all']
-    avg_dist = ph['dist_p90_m'].mean()
-    avg_hsr  = ph['hsr_p90_m'].mean()
+    st.markdown('<div class="section-header">Physical output · match by match (last 20 starts · 60+ mins)</div>', unsafe_allow_html=True)
+    # Limit to 60+ min appearances only, last 20 — mirrors Wyscout form trend filter
+    ph_chart = ph[ph['minutes_full_all'] >= 60].sort_values('match_date', ascending=True).tail(20).reset_index(drop=True)
+    ph_chart['match_label']  = ph_chart.apply(lambda r: parse_physical_label(r['match_name'], r['team_name']), axis=1)
+    ph_chart['dist_p90_m']   = ph_chart.apply(lambda r: p90(r['total_distance_full_all'],  r['minutes_full_all']), axis=1)
+    ph_chart['hsr_p90_m']    = ph_chart.apply(lambda r: p90(r['hsr_distance_full_all'],    r['minutes_full_all']), axis=1)
+    ph_chart['sprint_p90_m'] = ph_chart.apply(lambda r: p90(r['sprint_distance_full_all'], r['minutes_full_all']), axis=1)
+    ph_mins = ph_chart['minutes_full_all']
+    avg_dist = ph_chart['dist_p90_m'].mean()
+    avg_hsr  = ph_chart['hsr_p90_m'].mean()
     opac = mins_to_opacity(ph_mins)
 
     st.caption("💡 Bar opacity = minutes played (lighter = shorter appearance) · Purple line = 5-match rolling average")
@@ -775,60 +777,60 @@ if ph is not None and len(ph) > 0:
     tab1,tab2,tab3 = st.tabs(["Distance","HSR & Sprint","PSV99 & Accelerations"])
 
     with tab1:
-        bar_cols = [rgba(GOLD,opac[i]) if ph['dist_p90_m'].iloc[i]>=avg_dist else rgba('#333333',opac[i]) for i in range(len(ph))]
+        bar_cols = [rgba(GOLD,opac[i]) if ph_chart['dist_p90_m'].iloc[i]>=avg_dist else rgba('#333333',opac[i]) for i in range(len(ph_chart))]
         fig = go.Figure()
-        fig.add_bar(x=ph['match_label'],y=ph['dist_p90_m'],marker_color=bar_cols,name='Dist p90',
+        fig.add_bar(x=ph_chart['match_label'],y=ph_chart['dist_p90_m'],marker_color=bar_cols,name='Dist p90',
             customdata=ph_mins,hovertemplate='%{x}<br>%{y:,.0f}m · %{customdata:.0f} mins<extra></extra>')
-        fig.add_scatter(x=ph['match_label'],y=[avg_dist]*len(ph),mode='lines',
+        fig.add_scatter(x=ph_chart['match_label'],y=[avg_dist]*len(ph_chart),mode='lines',
             name=f'Player avg ({avg_dist:,.0f}m)',line=dict(color=GOLD,width=1.5,dash='dot'),hoverinfo='skip')
-        fig.add_scatter(x=ph['match_label'],y=rolling_avg(ph['dist_p90_m']),mode='lines',
+        fig.add_scatter(x=ph_chart['match_label'],y=rolling_avg(ph_chart['dist_p90_m']),mode='lines',
             name='5-match rolling avg',line=dict(color=PURPLE,width=2),hovertemplate='Rolling avg: %{y:,.0f}m<extra></extra>')
         if 'total_dist_p90' in phys_peers:
             la=phys_peers['total_dist_p90'].mean()
-            fig.add_scatter(x=ph['match_label'],y=[la]*len(ph),mode='lines',
+            fig.add_scatter(x=ph_chart['match_label'],y=[la]*len(ph_chart),mode='lines',
                 name=f'Position avg ({la:,.0f}m)',line=dict(color='#888',width=1.5,dash='dash'),hoverinfo='skip')
         fig.update_layout(**base_layout('Total distance per 90 (m)',height=320))
-        fig.update_yaxes(range=[8000,ph['dist_p90_m'].max()*1.08])
+        fig.update_yaxes(range=[8000,ph_chart['dist_p90_m'].max()*1.08])
         st.plotly_chart(fig,use_container_width=True)
 
     with tab2:
         fig2=go.Figure()
-        fig2.add_bar(x=ph['match_label'],y=ph['hsr_p90_m'],name='HSR dist p90',
+        fig2.add_bar(x=ph_chart['match_label'],y=ph_chart['hsr_p90_m'],name='HSR dist p90',
             marker_color=colour_list(BLUE,opac),
             customdata=ph_mins,hovertemplate='%{x}<br>HSR: %{y:.0f}m · %{customdata:.0f} mins<extra></extra>')
-        fig2.add_bar(x=ph['match_label'],y=ph['sprint_p90_m'],name='Sprint dist p90',
+        fig2.add_bar(x=ph_chart['match_label'],y=ph_chart['sprint_p90_m'],name='Sprint dist p90',
             marker_color=colour_list(GOLD,opac),
             customdata=ph_mins,hovertemplate='%{x}<br>Sprint: %{y:.0f}m · %{customdata:.0f} mins<extra></extra>')
-        fig2.add_scatter(x=ph['match_label'],y=[avg_hsr]*len(ph),mode='lines',
+        fig2.add_scatter(x=ph_chart['match_label'],y=[avg_hsr]*len(ph_chart),mode='lines',
             name=f'Player HSR avg ({avg_hsr:.0f}m)',line=dict(color=BLUE,width=1.5,dash='dot'),hoverinfo='skip')
-        fig2.add_scatter(x=ph['match_label'],y=rolling_avg(ph['hsr_p90_m']),mode='lines',
+        fig2.add_scatter(x=ph_chart['match_label'],y=rolling_avg(ph_chart['hsr_p90_m']),mode='lines',
             name='HSR rolling avg',line=dict(color=PURPLE,width=2),hovertemplate='Rolling avg: %{y:.0f}m<extra></extra>')
         if 'hsr_dist_p90' in phys_peers:
             la=phys_peers['hsr_dist_p90'].mean()
-            fig2.add_scatter(x=ph['match_label'],y=[la]*len(ph),mode='lines',
+            fig2.add_scatter(x=ph_chart['match_label'],y=[la]*len(ph_chart),mode='lines',
                 name=f'Position HSR avg ({la:.0f}m)',line=dict(color='#888',width=1.5,dash='dash'),hoverinfo='skip')
         fig2.update_layout(**base_layout('HSR & sprint distance per 90 (m)',height=320),barmode='group')
         st.plotly_chart(fig2,use_container_width=True)
 
     with tab3:
         fig3=make_subplots(specs=[[{"secondary_y":True}]])
-        avg_psv=ph['psv99'].mean()
-        fig3.add_scatter(x=ph['match_label'],y=ph['psv99'],mode='lines+markers',name='PSV99',
+        avg_psv=ph_chart['psv99'].mean()
+        fig3.add_scatter(x=ph_chart['match_label'],y=ph_chart['psv99'],mode='lines+markers',name='PSV99',
             line=dict(color=GREEN,width=2),marker=dict(size=5,color=GREEN),
             hovertemplate='%{x}<br>PSV99: %{y:.2f}<extra></extra>',secondary_y=False)
-        fig3.add_scatter(x=ph['match_label'],y=[avg_psv]*len(ph),mode='lines',name=f'Avg ({avg_psv:.2f})',
+        fig3.add_scatter(x=ph_chart['match_label'],y=[avg_psv]*len(ph_chart),mode='lines',name=f'Avg ({avg_psv:.2f})',
             line=dict(color='#555',width=1,dash='dot'),hoverinfo='skip',secondary_y=False)
         if 'psv99_avg' in phys_peers:
             la=phys_peers['psv99_avg'].mean()
-            fig3.add_scatter(x=ph['match_label'],y=[la]*len(ph),mode='lines',
+            fig3.add_scatter(x=ph_chart['match_label'],y=[la]*len(ph_chart),mode='lines',
                 name=f'Position avg ({la:.2f})',line=dict(color='#888',width=1.5,dash='dash'),hoverinfo='skip',secondary_y=False)
-        fig3.add_bar(x=ph['match_label'],
-            y=ph.apply(lambda r:p90(r['highaccel_count_full_all'],r['minutes_full_all']),axis=1),
+        fig3.add_bar(x=ph_chart['match_label'],
+            y=ph_chart.apply(lambda r:p90(r['highaccel_count_full_all'],r['minutes_full_all']),axis=1),
             name='High accel p90',marker_color=colour_list(GOLD,opac),
             customdata=ph_mins,hovertemplate='%{x}<br>High accel: %{y:.1f} · %{customdata:.0f} mins<extra></extra>',
             secondary_y=True)
         fig3.update_layout(**base_layout('PSV99 & high accelerations per 90',height=320))
-        fig3.update_yaxes(range=[7.0,ph['psv99'].max()+0.3],secondary_y=False,
+        fig3.update_yaxes(range=[7.0,ph_chart['psv99'].max()+0.3],secondary_y=False,
             title_text='PSV99',title_font=dict(size=10,color='#555'))
         fig3.update_yaxes(secondary_y=True,title_text='High accel p90',
             title_font=dict(size=10,color='#555'),showgrid=False)
