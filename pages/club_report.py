@@ -474,7 +474,7 @@ if ws_raw is None:
     st.error(f"No Wyscout sheet found for {selected_name}.")
     st.stop()
 
-ws = ws_raw[ws_raw['Minutes played'] >= 20].copy().sort_values('Date').reset_index(drop=True)
+ws = ws_raw.copy().sort_values('Date').reset_index(drop=True)
 ph = ph_raw[ph_raw['minutes_full_all'] >= 20].copy().sort_values('match_date').reset_index(drop=True) if ph_raw is not None else None
 
 club   = ph_raw['team_name'].iloc[0]      if ph_raw is not None and 'team_name'      in ph_raw.columns else ""

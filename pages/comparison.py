@@ -101,49 +101,73 @@ WS_FILES = {
 }
 
 COMP_METRICS = [
-    ("Total dist p90",   'total_dist_p90',   False),
-    ("HSR dist p90",     'hsr_dist_p90',     False),
-    ("Sprint dist p90",  'sprint_dist_p90',  False),
-    ("PSV99 avg",        'psv99_avg',        False),
-    ("Goals p90",        'goals_p90',        False),
-    ("Assists p90",      'assists_p90',      False),
-    ("xG p90",           'xg_p90',           False),
-    ("xA p90",           'xa_p90',           False),
-    ("Shot asts p90",    'shot_asts_p90',    False),
-    ("Touches box p90",  'touches_box_p90',  False),
-    ("Dribbles p90",     'dribbles_p90',     False),
-    ("Prog runs p90",    'prog_runs_p90',    False),
-    ("Passes p90",       'passes_p90',       False),
-    ("Pass acc %",       'pass_acc',         False),
-    ("Crosses p90",      'crosses_p90',      False),
-    ("PTF3 p90",         'ptf3_p90',         False),
-    ("Duels p90",        'duels_p90',        False),
-    ("Duel win %",       'duel_win',         False),
-    ("Aerial p90",       'aerial_p90',       False),
-    ("Aerial win %",     'aerial_win',       False),
-    ("Interceptions",    'interceptions_p90',False),
-    ("Recoveries p90",   'recoveries_p90',   False),
-    ("Def duels p90",    'def_duels_p90',    False),
-    ("Def duel win %",   'def_duel_win',     False),
+    # Physical
+    ("Total dist p90",    'total_dist_p90',    False),
+    ("HSR dist p90",      'hsr_dist_p90',      False),
+    ("Sprint dist p90",   'sprint_dist_p90',   False),
+    ("PSV99 avg",         'psv99_avg',         False),
+    # Attacking
+    ("Goals p90",         'goals_p90',         False),
+    ("Assists p90",       'assists_p90',        False),
+    ("xG p90",            'xg_p90',            False),
+    ("xA p90",            'xa_p90',            False),
+    ("Shot asts p90",     'shot_asts_p90',      False),
+    ("Shots on tgt %",    'shots_on_tgt_pct',   False),
+    ("Goal conv %",       'goal_conv_pct',      False),
+    ("Touches box p90",   'touches_box_p90',    False),
+    ("Dribbles p90",      'dribbles_p90',       False),
+    ("Prog runs p90",     'prog_runs_p90',      False),
+    ("Off duels p90",     'off_duels_p90',      False),
+    ("Off duel win %",    'off_duel_win',       False),
+    ("Fouls suffered p90",'fouls_suffered_p90', False),
+    # Passing
+    ("Passes p90",        'passes_p90',         False),
+    ("Pass acc %",        'pass_acc',           False),
+    ("Fwd passes p90",    'fwd_passes_p90',     False),
+    ("Recv passes p90",   'recv_passes_p90',    False),
+    ("Long passes p90",   'long_passes_p90',    False),
+    ("Crosses p90",       'crosses_p90',        False),
+    # Key passing
+    ("Through passes p90",'through_passes_p90', False),
+    ("Through pass acc %",'through_pass_acc',   False),
+    ("PTF3 p90",          'ptf3_p90',           False),
+    ("PTF3 acc %",        'ptf3_acc_pct',       False),
+    ("PPA p90",           'ppa_p90',            False),
+    ("2nd assists p90",   'second_asts_p90',    False),
+    # Duels & defensive
+    ("Duels p90",         'duels_p90',          False),
+    ("Duel win %",        'duel_win',           False),
+    ("Aerial p90",        'aerial_p90',         False),
+    ("Aerial win %",      'aerial_win',         False),
+    ("Def duels p90",     'def_duels_p90',      False),
+    ("Def duel win %",    'def_duel_win',       False),
+    ("Loose ball p90",    'loose_duels_p90',    False),
+    ("Slide tackles p90", 'slide_tackles_p90',  False),
+    ("Interceptions",     'interceptions_p90',  False),
+    ("Recoveries p90",    'recoveries_p90',     False),
+    ("Clearances p90",    'clearances_p90',     False),
+    ("Fouls p90",         'fouls_p90',          True),
 ]
 
 CHART_METRICS = [
-    ("Goals p90",       'goals_p90',        False),
-    ("xG p90",          'xg_p90',           False),
-    ("Shot asts p90",   'shot_asts_p90',    False),
-    ("Dribbles p90",    'dribbles_p90',     False),
-    ("Prog runs p90",   'prog_runs_p90',    False),
-    ("Crosses p90",     'crosses_p90',      False),
-    ("Duels p90",       'duels_p90',        False),
-    ("Duel win %",      'duel_win',         False),
-    ("Aerial p90",      'aerial_p90',       False),
-    ("Aerial win %",    'aerial_win',       False),
-    ("Def duels p90",   'def_duels_p90',    False),
-    ("Def duel win %",  'def_duel_win',     False),
-    ("Interceptions",   'interceptions_p90',False),
-    ("Recoveries p90",  'recoveries_p90',   False),
-    ("Pass acc %",      'pass_acc',         False),
-    ("Ball security",   'losses_p90',       True),
+    ("Goals p90",         'goals_p90',          False),
+    ("xG p90",            'xg_p90',             False),
+    ("Shot asts p90",     'shot_asts_p90',       False),
+    ("Dribbles p90",      'dribbles_p90',        False),
+    ("Prog runs p90",     'prog_runs_p90',       False),
+    ("Off duel win %",    'off_duel_win',        False),
+    ("Crosses p90",       'crosses_p90',         False),
+    ("Through passes p90",'through_passes_p90',  False),
+    ("Duels p90",         'duels_p90',           False),
+    ("Duel win %",        'duel_win',            False),
+    ("Aerial p90",        'aerial_p90',          False),
+    ("Aerial win %",      'aerial_win',          False),
+    ("Def duels p90",     'def_duels_p90',       False),
+    ("Def duel win %",    'def_duel_win',        False),
+    ("Interceptions",     'interceptions_p90',   False),
+    ("Recoveries p90",    'recoveries_p90',      False),
+    ("Pass acc %",        'pass_acc',            False),
+    ("Ball security",     'losses_p90',          True),
 ]
 
 
@@ -409,7 +433,7 @@ if ws_raw_a is None:
     st.error(f"No Wyscout sheet found for {selected_name}.")
     st.stop()
 
-ws_a     = ws_raw_a[ws_raw_a['Minutes played'] >= 20].copy()
+ws_a     = ws_raw_a.copy()
 ph_a     = ph_raw_a[ph_raw_a['minutes_full_all'] >= 20].copy() if ph_raw_a is not None else None
 season_a = get_season_totals(ws_a)
 phys_a   = get_physical_totals(ph_a) if ph_a is not None else None
@@ -468,26 +492,49 @@ if mode == "vs League player":
         return round(float(v), 3) if pd.notna(v) else None
 
     season_b = {
-        'goals_p90':         cv('Goals per 90'),
-        'assists_p90':       cv('Assists per 90'),
-        'xg_p90':            cv('xG per 90'),
-        'xa_p90':            cv('xA per 90'),
-        'shot_asts_p90':     cv('Shot assists per 90'),
-        'touches_box_p90':   cv('Touches in box per 90'),
-        'dribbles_p90':      cv('Dribbles per 90'),
-        'prog_runs_p90':     cv('Progressive runs per 90'),
-        'passes_p90':        cv('Passes per 90'),
-        'pass_acc':          cv('Accurate passes, %'),
-        'crosses_p90':       cv('Crosses per 90'),
-        'ptf3_p90':          cv('Passes to final third per 90'),
-        'duels_p90':         cv('Duels per 90'),
-        'duel_win':          cv('Duels won, %'),
-        'aerial_p90':        cv('Aerial duels per 90'),
-        'aerial_win':        cv('Aerial duels won, %'),
-        'interceptions_p90': cv('Interceptions per 90'),
-        'recoveries_p90':    cv('Successful defensive actions per 90'),
-        'def_duels_p90':     cv('Defensive duels per 90'),
-        'def_duel_win':      cv('Defensive duels won, %'),
+        # Attacking
+        'goals_p90':          cv('Goals per 90'),
+        'assists_p90':        cv('Assists per 90'),
+        'xg_p90':             cv('xG per 90'),
+        'xa_p90':             cv('xA per 90'),
+        'shot_asts_p90':      cv('Shot assists per 90'),
+        'shots_on_tgt_pct':   cv('Shots on target, %'),
+        'goal_conv_pct':      cv('Goal conversion, %'),
+        'touches_box_p90':    cv('Touches in box per 90'),
+        'dribbles_p90':       cv('Dribbles per 90'),
+        'prog_runs_p90':      cv('Progressive runs per 90'),
+        'off_duels_p90':      cv('Offensive duels per 90'),
+        'off_duel_win':       cv('Offensive duels won, %'),
+        'fouls_suffered_p90': cv('Fouls suffered per 90'),
+        # Passing
+        'passes_p90':         cv('Passes per 90'),
+        'pass_acc':           cv('Accurate passes, %'),
+        'fwd_passes_p90':     cv('Forward passes per 90'),
+        'recv_passes_p90':    cv('Received passes per 90'),
+        'long_passes_p90':    cv('Long passes per 90'),
+        'crosses_p90':        cv('Crosses per 90'),
+        # Key passing
+        'through_passes_p90': cv('Through passes per 90'),
+        'through_pass_acc':   cv('Accurate through passes, %'),
+        'ptf3_p90':           cv('Passes to final third per 90'),
+        'ptf3_acc_pct':       cv('Accurate passes to final third, %'),
+        'ppa_p90':            cv('Passes to penalty area per 90'),
+        'second_asts_p90':    cv('Second assists per 90'),
+        # Duels & defensive
+        'duels_p90':          cv('Duels per 90'),
+        'duel_win':           cv('Duels won, %'),
+        'aerial_p90':         cv('Aerial duels per 90'),
+        'aerial_win':         cv('Aerial duels won, %'),
+        'interceptions_p90':  cv('Interceptions per 90'),
+        'recoveries_p90':     cv('Successful defensive actions per 90'),
+        'def_duels_p90':      cv('Defensive duels per 90'),
+        'def_duel_win':       cv('Defensive duels won, %'),
+        'off_duels_p90':      cv('Offensive duels per 90'),
+        'off_duel_win':       cv('Offensive duels won, %'),
+        'loose_duels_p90':    cv('Loose ball duels per 90'),
+        'slide_tackles_p90':  cv('Sliding tackles per 90'),
+        'clearances_p90':     cv('Clearances per 90'),
+        'fouls_p90':          cv('Fouls per 90'),
     }
 
     # Physical lookup for comparison player
@@ -534,7 +581,7 @@ else:
         st.error(f"No Wyscout sheet found for {other_name}.")
         st.stop()
 
-    ws_b     = ws_raw_b[ws_raw_b['Minutes played'] >= 20].copy()
+    ws_b     = ws_raw_b.copy()
     ph_b     = ph_raw_b[ph_raw_b['minutes_full_all'] >= 20].copy() if ph_raw_b is not None else None
     season_b = get_season_totals(ws_b)
     phys_b   = get_physical_totals(ph_b) if ph_b is not None else None
