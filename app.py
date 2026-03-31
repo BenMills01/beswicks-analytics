@@ -302,7 +302,8 @@ def resolve_wyscout_name(sc_player_id, fallback_short_name, matching_df, overrid
 
 
 def process_wyscout(df):
-    return df[df['Minutes played'] >= 20].copy().sort_values('Date').reset_index(drop=True)
+    # No minimum minutes filter — season totals should include all appearances
+    return df.copy().sort_values('Date').reset_index(drop=True)
 
 def process_physical(df):
     return df[df['minutes_full_all'] >= 20].copy().sort_values('match_date').reset_index(drop=True)
