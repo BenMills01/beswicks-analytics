@@ -465,6 +465,13 @@ ws_pos_key = find_player_position_file(short_name) if short_name else None
 if pos_file_override and pos_file_override != "Auto-detect":
     ws_pos_key = pos_file_override
 
+# Defaults for peer-file-only metrics (populated below if player is found in league file)
+for _k in ('accels_p90','key_passes_p90','smart_passes_p90','smart_pass_acc',
+           'third_asts_p90','deep_comp_p90','deep_crosses_p90','prog_passes_p90',
+           'prog_pass_acc','lat_passes_p90','lat_pass_acc','avg_pass_length',
+           'recv_lp_p90','padj_interceptions','padj_slide_tackles','shots_blocked_p90'):
+    season.setdefault(_k, None)
+
 # ── Override season metrics with league file values where more accurate ────────
 # Always look up the player's OWN league (not the peer filter) so the stat
 # doesn't change when the user toggles the league filter.
@@ -491,6 +498,23 @@ if ws_pos_key and short_name:
             # Override recoveries_p90 with league file 'Successful defensive actions per 90'
             if _lf('Successful defensive actions per 90') is not None:
                 season['recoveries_p90'] = _lf('Successful defensive actions per 90')
+            # Supplement season dict with metrics only available in the league-wide file
+            season['accels_p90']        = _lf('Accelerations per 90')
+            season['key_passes_p90']    = _lf('Key passes per 90')
+            season['smart_passes_p90']  = _lf('Smart passes per 90')
+            season['smart_pass_acc']    = _lf('Accurate smart passes, %')
+            season['third_asts_p90']    = _lf('Third assists per 90')
+            season['deep_comp_p90']     = _lf('Deep completions per 90')
+            season['deep_crosses_p90']  = _lf('Deep completed crosses per 90')
+            season['prog_passes_p90']   = _lf('Progressive passes per 90')
+            season['prog_pass_acc']     = _lf('Accurate progressive passes, %')
+            season['lat_passes_p90']    = _lf('Lateral passes per 90')
+            season['lat_pass_acc']      = _lf('Accurate lateral passes, %')
+            season['avg_pass_length']   = _lf('Average pass length, m')
+            season['recv_lp_p90']       = _lf('Received long passes per 90')
+            season['padj_interceptions']= _lf('PAdj Interceptions')
+            season['padj_slide_tackles']= _lf('PAdj Sliding tackles')
+            season['shots_blocked_p90'] = _lf('Shots blocked per 90')
 
 # ── Peer groups ───────────────────────────────────────────────────────────────
 phys_peers, phys_peer_n = build_physical_peers(phys_csv, position_group, min_mins_peer, peer_league)
@@ -556,78 +580,139 @@ _traj_duels   = compute_trajectory(ws, 'Duels')
 # ── Seasonal metrics ──────────────────────────────────────────────────────────
 st.markdown('<div class="section-header">Seasonal metrics · per 90</div>', unsafe_allow_html=True)
 
+_tab_labels = ["Attacking", "Passing", "Key passing", "Defensive"]
 if phys:
-    st.markdown("**Physical output**")
+    _tab_labels.append("Physical")
+
+_tabs = st.tabs(_tab_labels)
+_tab = {label: tab for label, tab in zip(_tab_labels, _tabs)}
+
+# ── Attacking tab ──────────────────────────────────────────────────────────────
+with _tab["Attacking"]:
+    pa = season['pass_acc']
     st.markdown(metric_row([
-        metric_card("Total dist p90",  f"{int(phys['total_dist_p90']):,}m", "SkillCorner",                            'mc-good', gpp('total_dist_p90', phys.get('total_dist_p90')),  phys_peer_n),
-        metric_card("HSR dist p90",    f"{int(phys['hsr_dist_p90'])}m",     f"{phys['hsr_count_p90']:.0f} reps",      'mc-good', gpp('hsr_dist_p90',   phys.get('hsr_dist_p90')),    phys_peer_n),
-        metric_card("Sprint dist p90", f"{int(phys['sprint_dist_p90'])}m",  f"{phys['sprint_count_p90']:.0f} sprints",'mc-good', gpp('sprint_dist_p90',phys.get('sprint_dist_p90')), phys_peer_n),
-        metric_card("PSV99 avg",       str(phys['psv99_avg']),              f"Peak: {phys['psv99_max']}",             'mc-good', gpp('psv99_avg',      phys.get('psv99_avg')),        phys_peer_n),
-        metric_card("COD count p90",   f"{phys['cod_p90']:.0f}",            "Changes of direction"),
+        metric_card("Goals p90",      f"{season['goals_p90']:.2f}",      f"{season['goals_raw']} raw",   "mc-good" if season['goals_raw']>=2 else "",     gp('goals_p90',      season.get('goals_p90')),      ws_peer_n, trajectory=_traj_goals),
+        metric_card("Assists p90",    f"{season['assists_p90']:.2f}",    f"{season['assists_raw']} raw", "",                                               gp('assists_p90',    season.get('assists_p90')),    ws_peer_n),
+        metric_card("xG p90",         f"{season['xg_p90']:.2f}",         "",                             "",                                               gp('xg_p90',         season.get('xg_p90')),         ws_peer_n, trajectory=_traj_xg),
+        metric_card("Shots p90",      f"{season['shots_p90']:.2f}",      f"{season['shots_on_tgt_pct']:.1f}% on tgt" if season['shots_on_tgt_pct'] else "", "", gp('shots_p90', season.get('shots_p90')),      ws_peer_n),
+        metric_card("Goal conv %",    f"{season['goal_conv_pct']:.1f}%"  if season['goal_conv_pct'] else "–", "",                                          "", gp('goal_conv_pct',season.get('goal_conv_pct')), ws_peer_n),
     ]), unsafe_allow_html=True)
+    st.markdown(metric_row([
+        metric_card("xA p90",         f"{season['xa_p90']:.2f}",         "",                             "",                                               gp('xa_p90',         season.get('xa_p90')),         ws_peer_n),
+        metric_card("Shot asts p90",  f"{season['shot_asts_p90']:.2f}",  "",                             "mc-good" if season['shot_asts_p90']>0.5 else "",  gp('shot_asts_p90',  season.get('shot_asts_p90')),  ws_peer_n),
+        metric_card("Touches in box", f"{season['touches_box_p90']:.2f}","per 90",                       "",                                               gp('touches_box_p90',season.get('touches_box_p90')), ws_peer_n),
+        metric_card("Off duels p90",  f"{season['off_duels_p90']:.2f}",  f"{season['off_duel_win']:.1f}% win" if season['off_duel_win'] else "", "",        gp('off_duels_p90',  season.get('off_duels_p90')),  ws_peer_n),
+        metric_card("Dribbles p90",   f"{season['dribbles_p90']:.2f}",   f"{season['drib_pct']:.1f}% success" if season['drib_pct'] else "", "mc-good" if season['drib_pct'] and season['drib_pct']>60 else "", gp('dribbles_p90', season.get('dribbles_p90')), ws_peer_n),
+        metric_card("Prog runs p90",  f"{season['prog_runs_p90']:.2f}",  "",                             "",                                               gp('prog_runs_p90',  season.get('prog_runs_p90')),  ws_peer_n),
+        metric_card("Fouls suffered", f"{season['fouls_suffered_p90']:.2f}", "per 90",                  "",                                               gp('fouls_suffered_p90', season.get('fouls_suffered_p90')), ws_peer_n),
+    ]), unsafe_allow_html=True)
+    if season.get('accels_p90') is not None:
+        st.markdown(metric_row([
+            metric_card("Accelerations", f"{season['accels_p90']:.2f}", "per 90", "", gp('accels_p90', season.get('accels_p90')), ws_peer_n),
+        ]), unsafe_allow_html=True)
 
-st.markdown("**Attacking output**")
-st.markdown(metric_row([
-    metric_card("Goals p90",     f"{season['goals_p90']:.2f}",     f"{season['goals_raw']} raw",  "mc-good" if season['goals_raw']>=2 else "",       gp('goals_p90',     season.get('goals_p90')),     ws_peer_n, trajectory=_traj_goals),
-    metric_card("Assists p90",   f"{season['assists_p90']:.2f}",   f"{season['assists_raw']} raw","",                                                 gp('assists_p90',   season.get('assists_p90')),   ws_peer_n),
-    metric_card("xG p90",        f"{season['xg_p90']:.2f}",        "",                            "",                                                 gp('xg_p90',        season.get('xg_p90')),        ws_peer_n, trajectory=_traj_xg),
-    metric_card("xA p90",        f"{season['xa_p90']:.2f}",        "",                            "",                                                 gp('xa_p90',        season.get('xa_p90')),        ws_peer_n),
-    metric_card("Shot asts p90", f"{season['shot_asts_p90']:.2f}", "",                            "mc-good" if season['shot_asts_p90']>0.5 else "",   gp('shot_asts_p90', season.get('shot_asts_p90')), ws_peer_n),
-    metric_card("Touches in box",f"{season['touches_box_p90']:.2f}","per 90",                    "",                                                 gp('touches_box_p90',season.get('touches_box_p90')),ws_peer_n),
-]), unsafe_allow_html=True)
+# ── Passing tab ────────────────────────────────────────────────────────────────
+with _tab["Passing"]:
+    pa = season['pass_acc']
+    st.markdown(metric_row([
+        metric_card("Passes p90",     f"{season['passes_p90']:.1f}",     f"{pa:.1f}% accuracy" if pa else "",          "mc-good" if pa and pa>80 else "mc-warn" if pa and pa>70 else "mc-bad", gp('passes_p90',    season.get('passes_p90')),    ws_peer_n, trajectory=_traj_passes),
+        metric_card("Fwd passes p90", f"{season['fwd_passes_p90']:.1f}", f"{season['fwd_pass_acc']:.1f}% acc" if season['fwd_pass_acc'] else "",  "", gp('fwd_passes_p90', season.get('fwd_passes_p90')), ws_peer_n),
+        metric_card("Back passes p90",f"{season['back_passes_p90']:.1f}",f"{season['back_pass_acc']:.1f}% acc" if season['back_pass_acc'] else "", "", gp('back_passes_p90',season.get('back_passes_p90')),ws_peer_n),
+        metric_card("Long pass p90",  f"{season['long_passes_p90']:.2f}",f"{season['lp_acc']:.1f}% acc" if season['lp_acc'] else "",             "", gp('long_passes_p90',season.get('long_passes_p90')),ws_peer_n),
+        metric_card("Crosses p90",    f"{season['crosses_p90']:.2f}",    f"{season['cross_acc_pct']:.1f}% acc" if season['cross_acc_pct'] else "","", gp('crosses_p90',   season.get('crosses_p90')),   ws_peer_n),
+    ]), unsafe_allow_html=True)
+    st.markdown(metric_row([
+        metric_card("Through passes", f"{season['through_passes_p90']:.2f}", f"{season['through_pass_acc']:.1f}% acc" if season['through_pass_acc'] else "", "", gp('through_passes_p90', season.get('through_passes_p90')), ws_peer_n),
+        metric_card("Recv passes p90",f"{season['recv_passes_p90']:.1f}",    "per 90",                                                                         "", gp('recv_passes_p90', season.get('recv_passes_p90')),       ws_peer_n),
+    ]), unsafe_allow_html=True)
+    _pass_extras = [c for c in [
+        metric_card("Lateral passes", f"{season['lat_passes_p90']:.1f}", f"{season['lat_pass_acc']:.1f}% acc" if season['lat_pass_acc'] else "", "", gp('lat_passes_p90', season.get('lat_passes_p90')), ws_peer_n) if season.get('lat_passes_p90') is not None else None,
+        metric_card("Recv long passes",f"{season['recv_lp_p90']:.2f}", "per 90", "", gp('recv_lp_p90', season.get('recv_lp_p90')), ws_peer_n) if season.get('recv_lp_p90') is not None else None,
+        metric_card("Avg pass length", f"{season['avg_pass_length']:.1f}m", "season avg", "", None, ws_peer_n) if season.get('avg_pass_length') is not None else None,
+    ] if c is not None]
+    if _pass_extras:
+        st.markdown(metric_row(_pass_extras), unsafe_allow_html=True)
 
-st.markdown("**Passing & ball-carrying**")
-pa = season['pass_acc']
-st.markdown(metric_row([
-    metric_card("Passes p90",    f"{season['passes_p90']:.1f}",     f"{pa:.1f}% accuracy" if pa else "",                   "mc-good" if pa and pa>80 else "mc-warn" if pa and pa>70 else "mc-bad", gp('passes_p90',    season.get('passes_p90')),    ws_peer_n, trajectory=_traj_passes),
-    metric_card("Long pass p90", f"{season['long_passes_p90']:.2f}",f"{season['lp_acc']:.1f}% acc" if season['lp_acc'] else "","",                                                                  gp('long_passes_p90',season.get('long_passes_p90')),ws_peer_n),
-    metric_card("Crosses p90",   f"{season['crosses_p90']:.2f}",    "",                                                     "",                                                                      gp('crosses_p90',   season.get('crosses_p90')),   ws_peer_n),
-    metric_card("Dribbles p90",  f"{season['dribbles_p90']:.2f}",   f"{season['drib_pct']:.1f}% success" if season['drib_pct'] else "","mc-good" if season['drib_pct'] and season['drib_pct']>60 else "",gp('dribbles_p90',season.get('dribbles_p90')),ws_peer_n),
-    metric_card("Prog runs p90", f"{season['prog_runs_p90']:.2f}",  "",                                                     "",                                                                      gp('prog_runs_p90', season.get('prog_runs_p90')), ws_peer_n),
-]), unsafe_allow_html=True)
+# ── Key passing tab ────────────────────────────────────────────────────────────
+with _tab["Key passing"]:
+    st.markdown(metric_row([
+        metric_card("xA p90",         f"{season['xa_p90']:.2f}",         "",                                                                          "", gp('xa_p90',         season.get('xa_p90')),         ws_peer_n),
+        metric_card("Shot asts p90",  f"{season['shot_asts_p90']:.2f}",  "",                                                                          "mc-good" if season['shot_asts_p90']>0.5 else "", gp('shot_asts_p90', season.get('shot_asts_p90')), ws_peer_n),
+        metric_card("2nd assists p90",f"{season['second_asts_p90']:.2f}","",                                                                          "", gp('second_asts_p90',season.get('second_asts_p90')), ws_peer_n),
+        metric_card("PTF3 p90",       f"{season['ptf3_p90']:.2f}",       f"{season['ptf3_acc_pct']:.1f}% acc" if season['ptf3_acc_pct'] else "",      "", gp('ptf3_p90',        season.get('ptf3_p90')),        ws_peer_n),
+        metric_card("Pass to box p90",f"{season['ppa_p90']:.2f}",        f"{season['ppa_acc_pct']:.1f}% acc" if season['ppa_acc_pct'] else "",        "", gp('ppa_p90',         season.get('ppa_p90')),         ws_peer_n),
+    ]), unsafe_allow_html=True)
+    _kp_extras = [c for c in [
+        metric_card("Key passes p90",  f"{season['key_passes_p90']:.2f}",  "per 90",                                                                    "", gp('key_passes_p90',   season.get('key_passes_p90')),  ws_peer_n) if season.get('key_passes_p90')  is not None else None,
+        metric_card("Smart passes p90",f"{season['smart_passes_p90']:.2f}",f"{season['smart_pass_acc']:.1f}% acc" if season['smart_pass_acc'] else "",  "", gp('smart_passes_p90', season.get('smart_passes_p90')),ws_peer_n) if season.get('smart_passes_p90') is not None else None,
+        metric_card("3rd assists p90", f"{season['third_asts_p90']:.2f}",  "per 90",                                                                    "", gp('third_asts_p90',   season.get('third_asts_p90')),  ws_peer_n) if season.get('third_asts_p90')  is not None else None,
+        metric_card("Deep comp p90",   f"{season['deep_comp_p90']:.2f}",   "per 90",                                                                    "", gp('deep_comp_p90',    season.get('deep_comp_p90')),   ws_peer_n) if season.get('deep_comp_p90')   is not None else None,
+        metric_card("Deep crosses p90",f"{season['deep_crosses_p90']:.2f}","per 90",                                                                    "", gp('deep_crosses_p90', season.get('deep_crosses_p90')),ws_peer_n) if season.get('deep_crosses_p90') is not None else None,
+        metric_card("Prog passes p90", f"{season['prog_passes_p90']:.2f}", f"{season['prog_pass_acc']:.1f}% acc" if season['prog_pass_acc'] else "",    "", gp('prog_passes_p90',  season.get('prog_passes_p90')), ws_peer_n) if season.get('prog_passes_p90') is not None else None,
+    ] if c is not None]
+    if _kp_extras:
+        st.markdown(metric_row(_kp_extras), unsafe_allow_html=True)
 
-st.markdown("**Defensive output**")
-st.markdown(metric_row([
-    metric_card("Duels p90",      f"{season['duels_p90']:.1f}",       f"{season['duel_win']:.1f}% win rate",                    "mc-warn" if season['duel_win'] and season['duel_win']<55 else "mc-good",       gp('duels_p90',      season.get('duels_p90')),       ws_peer_n, trajectory=_traj_duels),
-    metric_card("Aerial p90",     f"{season['aerial_p90']:.2f}",      f"{season['aerial_win']:.1f}% win rate" if season['aerial_win'] else "","",                                                                  gp('aerial_p90',     season.get('aerial_p90')),      ws_peer_n),
-    metric_card("Def duels p90",  f"{season['def_duels_p90']:.2f}",   f"{season['def_duel_win']:.1f}% win rate" if season['def_duel_win'] else "","mc-warn" if season['def_duel_win'] and season['def_duel_win']<60 else "mc-good",gp('def_duels_p90',season.get('def_duels_p90')),ws_peer_n),
-    metric_card("Interceptions",  f"{season['interceptions_p90']:.2f}","per 90",                                                "mc-good" if season['interceptions_p90']>4 else "",                              gp('interceptions_p90',season.get('interceptions_p90')),ws_peer_n),
-    metric_card("Recoveries p90", f"{season['recoveries_p90']:.2f}",  f"Opp half: {season['rec_opp_p90']:.2f}",               "",                                                                                  gp('recoveries_p90', season.get('recoveries_p90')),   ws_peer_n),
-    metric_card("Losses p90",     f"{season['losses_p90']:.2f}",      f"Own half: {season['losses_oh_p90']:.2f}",             "mc-bad" if season['losses_p90']>12 else "mc-warn",                              gp('losses_p90',     season.get('losses_p90'),True),  ws_peer_n),
-]), unsafe_allow_html=True)
+# ── Defensive tab ──────────────────────────────────────────────────────────────
+with _tab["Defensive"]:
+    st.markdown(metric_row([
+        metric_card("Duels p90",      f"{season['duels_p90']:.1f}",      f"{season['duel_win']:.1f}% win rate",                                 "mc-warn" if season['duel_win'] and season['duel_win']<55 else "mc-good",       gp('duels_p90',     season.get('duels_p90')),     ws_peer_n, trajectory=_traj_duels),
+        metric_card("Aerial p90",     f"{season['aerial_p90']:.2f}",     f"{season['aerial_win']:.1f}% win rate" if season['aerial_win'] else "", "",                                                                            gp('aerial_p90',    season.get('aerial_p90')),    ws_peer_n),
+        metric_card("Def duels p90",  f"{season['def_duels_p90']:.2f}",  f"{season['def_duel_win']:.1f}% win rate" if season['def_duel_win'] else "", "mc-warn" if season['def_duel_win'] and season['def_duel_win']<60 else "mc-good", gp('def_duels_p90', season.get('def_duels_p90')), ws_peer_n),
+        metric_card("Loose ball p90", f"{season['loose_duels_p90']:.2f}",f"{season['loose_duel_win']:.1f}% win" if season['loose_duel_win'] else "", "",                                                                        gp('loose_duels_p90', season.get('loose_duels_p90')), ws_peer_n),
+        metric_card("Slide tackles",  f"{season['slide_tackles_p90']:.2f}", f"{season['slide_tackle_pct']:.1f}% success" if season['slide_tackle_pct'] else "", "",                                                             gp('slide_tackles_p90', season.get('slide_tackles_p90')), ws_peer_n),
+    ]), unsafe_allow_html=True)
+    st.markdown(metric_row([
+        metric_card("Interceptions",  f"{season['interceptions_p90']:.2f}","per 90",                                                               "mc-good" if season['interceptions_p90']>4 else "",                           gp('interceptions_p90', season.get('interceptions_p90')), ws_peer_n),
+        metric_card("Recoveries p90", f"{season['recoveries_p90']:.2f}",  f"Opp half: {season['rec_opp_p90']:.2f}",                              "",                                                                            gp('recoveries_p90',season.get('recoveries_p90')),    ws_peer_n),
+        metric_card("Clearances p90", f"{season['clearances_p90']:.2f}",  "per 90",                                                               "",                                                                            None, ws_peer_n),
+        metric_card("Losses p90",     f"{season['losses_p90']:.2f}",      f"Own half: {season['losses_oh_p90']:.2f}",                            "mc-bad" if season['losses_p90']>12 else "mc-warn",                            gp('losses_p90',    season.get('losses_p90'), True), ws_peer_n),
+        metric_card("Fouls p90",      f"{season['fouls_p90']:.2f}",       "per 90",                                                               "mc-warn" if season['fouls_p90']>2.5 else "",                                  gp('fouls_p90',     season.get('fouls_p90'), True),  ws_peer_n),
+    ]), unsafe_allow_html=True)
+    _def_extras = [c for c in [
+        metric_card("Shots blocked",    f"{season['shots_blocked_p90']:.2f}",  "per 90", "", gp('shots_blocked_p90',   season.get('shots_blocked_p90')),   ws_peer_n) if season.get('shots_blocked_p90')   is not None else None,
+        metric_card("PAdj interceptions",f"{season['padj_interceptions']:.2f}","PAdj",   "", gp('padj_interceptions',  season.get('padj_interceptions')),   ws_peer_n) if season.get('padj_interceptions')  is not None else None,
+        metric_card("PAdj slide tackles",f"{season['padj_slide_tackles']:.2f}","PAdj",   "", gp('padj_slide_tackles',  season.get('padj_slide_tackles')),   ws_peer_n) if season.get('padj_slide_tackles')  is not None else None,
+    ] if c is not None]
+    if _def_extras:
+        st.markdown(metric_row(_def_extras), unsafe_allow_html=True)
 
-st.markdown("**Win rates & accuracy**")
-st.markdown(metric_row([
-    metric_card("Pass acc %",        f"{season['pass_acc']:.1f}%"     if season['pass_acc']    else "–", f"{season['passes_p90']:.1f} passes p90",    "mc-good" if pa and pa>80 else "mc-warn",                                          gp('pass_acc',    season.get('pass_acc')),    ws_peer_n),
-    metric_card("Duel win %",        f"{season['duel_win']:.1f}%"     if season['duel_win']    else "–", f"{season['duels_p90']:.1f} duels p90",      "mc-warn" if season['duel_win'] and season['duel_win']<55 else "mc-good",          gp('duel_win',    season.get('duel_win')),    ws_peer_n),
-    metric_card("Aerial win %",      f"{season['aerial_win']:.1f}%"   if season['aerial_win']  else "–", f"{season['aerial_p90']:.1f} aerials p90",   "",                                                                                   gp('aerial_win',  season.get('aerial_win')),  ws_peer_n),
-    metric_card("Def duel win %",    f"{season['def_duel_win']:.1f}%" if season['def_duel_win'] else "–",f"{season['def_duels_p90']:.1f} def duels",  "mc-warn" if season['def_duel_win'] and season['def_duel_win']<60 else "mc-good",  gp('def_duel_win',season.get('def_duel_win')),ws_peer_n),
-    metric_card("Dribble success %", f"{season['drib_pct']:.1f}%"     if season['drib_pct']    else "–", f"{season['dribbles_p90']:.1f} dribbles p90","mc-good" if season['drib_pct'] and season['drib_pct']>60 else "",                  gp('drib_pct',    season.get('drib_pct')),    ws_peer_n),
-]), unsafe_allow_html=True)
+# ── Physical tab (SkillCorner) ─────────────────────────────────────────────────
+if phys:
+    with _tab["Physical"]:
+        st.markdown("**Output**")
+        st.markdown(metric_row([
+            metric_card("Total dist p90",  f"{int(phys['total_dist_p90']):,}m", "SkillCorner",                             'mc-good', gpp('total_dist_p90',  phys.get('total_dist_p90')),  phys_peer_n),
+            metric_card("HSR dist p90",    f"{int(phys['hsr_dist_p90'])}m",     f"{phys['hsr_count_p90']:.0f} reps",       'mc-good', gpp('hsr_dist_p90',    phys.get('hsr_dist_p90')),    phys_peer_n),
+            metric_card("Sprint dist p90", f"{int(phys['sprint_dist_p90'])}m",  f"{phys['sprint_count_p90']:.0f} sprints", 'mc-good', gpp('sprint_dist_p90', phys.get('sprint_dist_p90')), phys_peer_n),
+            metric_card("Hi accels p90",   f"{phys['hi_accel_p90']:.0f}",       "SkillCorner",                             'mc-good', gpp('hi_accel_p90',    phys.get('hi_accel_p90')),    phys_peer_n),
+            metric_card("PSV99 avg",       str(phys['psv99_avg']),              f"Peak: {phys['psv99_max']}",              'mc-good', gpp('psv99_avg',       phys.get('psv99_avg')),        phys_peer_n),
+            metric_card("COD count p90",   f"{phys['cod_p90']:.0f}",            "Changes of direction"),
+        ]), unsafe_allow_html=True)
 
-pressing_raw = sheets.get('Pressing')
-if pressing_raw is not None:
-    press = pressing_raw[pressing_raw['minutes_played_per_match'] >= 20]
-    if len(press) > 0:
-        st.markdown("**Under-pressure passing**")
-        c1,c2,c3 = st.columns(3)
-        avg_ret  = press['ball_retention_ratio_under_pressure'].mean()
-        avg_comp = press['pass_completion_ratio_under_pressure'].mean()
-        avg_pres = press['count_pressures_received_per_match'].mean()
-        c1.markdown(metric_card("Pressures received p90",  f"{avg_pres:.1f}"),                                                 unsafe_allow_html=True)
-        c2.markdown(metric_card("Ball retention under press",  f"{avg_ret:.1f}%",  vcls="mc-warn" if avg_ret <70 else "mc-good"), unsafe_allow_html=True)
-        c3.markdown(metric_card("Pass completion under press", f"{avg_comp:.1f}%", vcls="mc-warn" if avg_comp<70 else "mc-good"), unsafe_allow_html=True)
+        pressing_raw = sheets.get('Pressing')
+        if pressing_raw is not None:
+            press = pressing_raw[pressing_raw['minutes_played_per_match'] >= 20]
+            if len(press) > 0:
+                st.markdown("**Under-pressure passing**")
+                avg_ret  = press['ball_retention_ratio_under_pressure'].mean()
+                avg_comp = press['pass_completion_ratio_under_pressure'].mean()
+                avg_pres = press['count_pressures_received_per_match'].mean()
+                c1, c2, c3 = st.columns(3)
+                c1.markdown(metric_card("Pressures received p90",   f"{avg_pres:.1f}"),                                                  unsafe_allow_html=True)
+                c2.markdown(metric_card("Ball retention under press",f"{avg_ret:.1f}%",  vcls="mc-warn" if avg_ret <70 else "mc-good"),  unsafe_allow_html=True)
+                c3.markdown(metric_card("Pass comp under press",     f"{avg_comp:.1f}%", vcls="mc-warn" if avg_comp<70 else "mc-good"),  unsafe_allow_html=True)
 
-obr_raw = sheets.get('Off_Ball_Runs')
-if obr_raw is not None:
-    obr = obr_raw[obr_raw['minutes_played_per_match'] >= 20]
-    if len(obr) > 0:
-        st.markdown("**Off-ball runs**")
-        c1,c2,c3,c4 = st.columns(4)
-        c1.markdown(metric_card("Runs per match", f"{obr['count_runs_per_match'].mean():.1f}"),          unsafe_allow_html=True)
-        c2.markdown(metric_card("Dangerous runs", f"{obr['count_dangerous_runs_per_match'].mean():.1f}"),unsafe_allow_html=True)
-        c3.markdown(metric_card("Runs targeted",  f"{obr['count_runs_targeted_per_match'].mean():.1f}"), unsafe_allow_html=True)
-        c4.markdown(metric_card("Runs received",  f"{obr['count_runs_received_per_match'].mean():.1f}"), unsafe_allow_html=True)
+        obr_raw = sheets.get('Off_Ball_Runs')
+        if obr_raw is not None:
+            obr = obr_raw[obr_raw['minutes_played_per_match'] >= 20]
+            if len(obr) > 0:
+                st.markdown("**Off-ball runs**")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.markdown(metric_card("Runs per match", f"{obr['count_runs_per_match'].mean():.1f}"),           unsafe_allow_html=True)
+                c2.markdown(metric_card("Dangerous runs", f"{obr['count_dangerous_runs_per_match'].mean():.1f}"), unsafe_allow_html=True)
+                c3.markdown(metric_card("Runs targeted",  f"{obr['count_runs_targeted_per_match'].mean():.1f}"),  unsafe_allow_html=True)
+                c4.markdown(metric_card("Runs received",  f"{obr['count_runs_received_per_match'].mean():.1f}"),  unsafe_allow_html=True)
 
 # ── Percentile radar ──────────────────────────────────────────────────────────
 if ws_peer_n >= 5:

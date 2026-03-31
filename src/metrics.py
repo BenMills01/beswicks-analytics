@@ -331,41 +331,64 @@ def get_season_totals(ws: pd.DataFrame) -> Dict[str, object]:
         'red':    int(ws.iloc[:, 40].sum()),  # red cards
 
         # Attacking
-        'goals_p90':       p90(s['Goals'],  mins),
-        'assists_p90':     p90(s['Assists'], mins),
-        'xg_p90':          p90(s['xG'],     mins),
-        'xa_p90':          p90(s['xA'],     mins),
-        'shots_p90':       p90(s['Shots'],  mins),
-        'shot_asts_p90':   p90(ws['Shot assists'].sum(),           mins),
-        'touches_box_p90': p90(ws['Touches in penalty area'].sum(), mins),
-        'dribbles_p90':    p90(s['Dribbles'], mins),
-        'drib_pct':        pct(ws.iloc[:, 19].sum(), s['Dribbles']),  # successful dribbles
-        'prog_runs_p90':   p90(ws['Progressive runs'].sum(), mins),
-        'ptf3_p90':        p90(ws['Passes to final third'].sum(), mins),
+        'goals_p90':          p90(s['Goals'],  mins),
+        'assists_p90':        p90(s['Assists'], mins),
+        'xg_p90':             p90(s['xG'],     mins),
+        'xa_p90':             p90(s['xA'],     mins),
+        'shots_p90':          p90(s['Shots'],  mins),
+        'shots_on_tgt_pct':   pct(ws.iloc[:, 10].sum(), s['Shots']),       # shots on target
+        'goal_conv_pct':      pct(s['Goals'], s['Shots']),
+        'shot_asts_p90':      p90(ws['Shot assists'].sum(),            mins),
+        'touches_box_p90':    p90(ws['Touches in penalty area'].sum(), mins),
+        'off_duels_p90':      p90(ws.iloc[:, 42].sum(), mins),             # offensive duels
+        'off_duel_win':       pct(ws.iloc[:, 43].sum(), ws.iloc[:, 42].sum()),
+        'dribbles_p90':       p90(s['Dribbles'], mins),
+        'drib_pct':           pct(ws.iloc[:, 19].sum(), s['Dribbles']),    # successful dribbles
+        'prog_runs_p90':      p90(ws['Progressive runs'].sum(), mins),
+        'fouls_suffered_p90': p90(ws['Fouls suffered'].sum(), mins),
 
         # Passing
-        'passes_p90':      p90(s['Passes'],      mins),
-        'pass_acc':        pct(ws.iloc[:, 13].sum(), s['Passes']),       # accurate passes
-        'long_passes_p90': p90(s['Long passes'], mins),
-        'lp_acc':          pct(ws.iloc[:, 15].sum(), s['Long passes']),  # accurate long passes
-        'crosses_p90':     p90(s['Crosses'], mins),
+        'passes_p90':         p90(s['Passes'],      mins),
+        'pass_acc':           pct(ws.iloc[:, 13].sum(), s['Passes']),      # accurate passes
+        'fwd_passes_p90':     p90(ws.iloc[:, 57].sum(), mins),             # forward passes
+        'fwd_pass_acc':       pct(ws.iloc[:, 58].sum(), ws.iloc[:, 57].sum()),
+        'back_passes_p90':    p90(ws.iloc[:, 59].sum(), mins),             # back passes
+        'back_pass_acc':      pct(ws.iloc[:, 60].sum(), ws.iloc[:, 59].sum()),
+        'long_passes_p90':    p90(s['Long passes'], mins),
+        'lp_acc':             pct(ws.iloc[:, 15].sum(), s['Long passes']), # accurate long passes
+        'crosses_p90':        p90(s['Crosses'], mins),
+        'cross_acc_pct':      pct(ws.iloc[:, 17].sum(), s['Crosses']),     # accurate crosses
+        'through_passes_p90': p90(ws.iloc[:, 48].sum(), mins),             # through passes
+        'through_pass_acc':   pct(ws.iloc[:, 49].sum(), ws.iloc[:, 48].sum()),
+        'recv_passes_p90':    p90(ws.iloc[:, 56].sum(), mins),             # received passes
+
+        # Key passing
+        'ptf3_p90':           p90(ws['Passes to final third'].sum(), mins),
+        'ptf3_acc_pct':       pct(ws.iloc[:, 53].sum(), ws['Passes to final third'].sum()),  # accurate PTF3
+        'ppa_p90':            p90(ws.iloc[:, 54].sum(), mins),             # passes to penalty area
+        'ppa_acc_pct':        pct(ws.iloc[:, 55].sum(), ws.iloc[:, 54].sum()),
+        'second_asts_p90':    p90(ws.iloc[:, 51].sum(), mins),             # second assists
 
         # Duels
-        'duels_p90':       p90(s['Duels'], mins),
-        'duel_win':        pct(ws.iloc[:, 21].sum(), s['Duels']),         # duels won
-        'aerial_p90':      p90(s['Aerial duels'], mins),
-        'aerial_win':      pct(ws.iloc[:, 23].sum(), s['Aerial duels']), # aerial duels won
-        'def_duels_p90':   p90(ws.iloc[:, 31].sum(), mins),              # defensive duels
-        'def_duel_win':    pct(ws.iloc[:, 32].sum(), ws.iloc[:, 31].sum()),  # def duels won
+        'duels_p90':          p90(s['Duels'], mins),
+        'duel_win':           pct(ws.iloc[:, 21].sum(), s['Duels']),       # duels won
+        'aerial_p90':         p90(s['Aerial duels'], mins),
+        'aerial_win':         pct(ws.iloc[:, 23].sum(), s['Aerial duels']),  # aerial duels won
+        'def_duels_p90':      p90(ws.iloc[:, 31].sum(), mins),             # defensive duels
+        'def_duel_win':       pct(ws.iloc[:, 32].sum(), ws.iloc[:, 31].sum()),
+        'loose_duels_p90':    p90(ws.iloc[:, 33].sum(), mins),             # loose ball duels
+        'loose_duel_win':     pct(ws.iloc[:, 34].sum(), ws.iloc[:, 33].sum()),
+        'slide_tackles_p90':  p90(ws.iloc[:, 35].sum(), mins),             # sliding tackles
+        'slide_tackle_pct':   pct(ws.iloc[:, 36].sum(), ws.iloc[:, 35].sum()),
 
         # Defensive
-        'interceptions_p90': p90(s['Interceptions'], mins),
-        'recoveries_p90':    p90(s['Recoveries'], mins),  # raw recoveries from master
-        'rec_opp_p90':       p90(ws['opp. half'].sum(), mins),
-        'clearances_p90':    p90(s['Clearances'], mins),
-        'losses_p90':        p90(s['Losses'],     mins),
-        'losses_oh_p90':     p90(ws['own half'].sum(), mins),
-        'fouls_p90':         p90(ws['Fouls'].sum(), mins),
+        'interceptions_p90':  p90(s['Interceptions'], mins),
+        'recoveries_p90':     p90(s['Recoveries'], mins),
+        'rec_opp_p90':        p90(ws['opp. half'].sum(), mins),
+        'clearances_p90':     p90(s['Clearances'], mins),
+        'losses_p90':         p90(s['Losses'],     mins),
+        'losses_oh_p90':      p90(ws['own half'].sum(), mins),
+        'fouls_p90':          p90(ws['Fouls'].sum(), mins),
     }
 
 
@@ -622,28 +645,70 @@ def build_wyscout_peers(
         return s if len(s) >= MIN_PEER_N else None
 
     out = {
-        'goals_p90':         ser('Goals per 90'),
-        'assists_p90':       ser('Assists per 90'),
-        'xg_p90':            ser('xG per 90'),
-        'xa_p90':            ser('xA per 90'),
-        'shot_asts_p90':     ser('Shot assists per 90'),
-        'touches_box_p90':   ser('Touches in box per 90'),
-        'dribbles_p90':      ser('Dribbles per 90'),
-        'drib_pct':          ser('Successful dribbles, %'),
-        'prog_runs_p90':     ser('Progressive runs per 90'),
-        'passes_p90':        ser('Passes per 90'),
-        'pass_acc':          ser('Accurate passes, %'),
-        'long_passes_p90':   ser('Long passes per 90'),
-        'crosses_p90':       ser('Crosses per 90'),
-        'duels_p90':         ser('Duels per 90'),
-        'duel_win':          ser('Duels won, %'),
-        'aerial_p90':        ser('Aerial duels per 90'),
-        'aerial_win':        ser('Aerial duels won, %'),
-        'def_duels_p90':     ser('Defensive duels per 90'),
-        'def_duel_win':      ser('Defensive duels won, %'),
-        'interceptions_p90': ser('Interceptions per 90'),
+        # Attacking
+        'goals_p90':           ser('Goals per 90'),
+        'assists_p90':         ser('Assists per 90'),
+        'xg_p90':              ser('xG per 90'),
+        'xa_p90':              ser('xA per 90'),
+        'shots_p90':           ser('Shots per 90'),
+        'shots_on_tgt_pct':    ser('Shots on target, %'),
+        'goal_conv_pct':       ser('Goal conversion, %'),
+        'shot_asts_p90':       ser('Shot assists per 90'),
+        'touches_box_p90':     ser('Touches in box per 90'),
+        'off_duels_p90':       ser('Offensive duels per 90'),
+        'off_duel_win':        ser('Offensive duels won, %'),
+        'dribbles_p90':        ser('Dribbles per 90'),
+        'drib_pct':            ser('Successful dribbles, %'),
+        'prog_runs_p90':       ser('Progressive runs per 90'),
+        'fouls_suffered_p90':  ser('Fouls suffered per 90'),
+        # Passing
+        'passes_p90':          ser('Passes per 90'),
+        'pass_acc':            ser('Accurate passes, %'),
+        'fwd_passes_p90':      ser('Forward passes per 90'),
+        'fwd_pass_acc':        ser('Accurate forward passes, %'),
+        'back_passes_p90':     ser('Back passes per 90'),
+        'back_pass_acc':       ser('Accurate back passes, %'),
+        'long_passes_p90':     ser('Long passes per 90'),
+        'lp_acc':              ser('Accurate long passes, %'),
+        'crosses_p90':         ser('Crosses per 90'),
+        'cross_acc_pct':       ser('Accurate crosses, %'),
+        'through_passes_p90':  ser('Through passes per 90'),
+        'through_pass_acc':    ser('Accurate through passes, %'),
+        'recv_passes_p90':     ser('Received passes per 90'),
+        # Key passing
+        'ptf3_p90':            ser('Passes to final third per 90'),
+        'ptf3_acc_pct':        ser('Accurate passes to final third, %'),
+        'ppa_p90':             ser('Passes to penalty area per 90'),
+        'ppa_acc_pct':         ser('Accurate passes to penalty area, %'),
+        'second_asts_p90':     ser('Second assists per 90'),
+        # Duels / defensive
+        'duels_p90':           ser('Duels per 90'),
+        'duel_win':            ser('Duels won, %'),
+        'aerial_p90':          ser('Aerial duels per 90'),
+        'aerial_win':          ser('Aerial duels won, %'),
+        'def_duels_p90':       ser('Defensive duels per 90'),
+        'def_duel_win':        ser('Defensive duels won, %'),
+        'slide_tackles_p90':   ser('Sliding tackles per 90'),
+        'padj_slide_tackles':  ser('PAdj Sliding tackles'),
+        'interceptions_p90':   ser('Interceptions per 90'),
+        'padj_interceptions':  ser('PAdj Interceptions'),
+        'shots_blocked_p90':   ser('Shots blocked per 90'),
         # Wyscout composite: won def duels + interceptions + recoveries
-        'recoveries_p90':    ser('Successful defensive actions per 90'),
+        'recoveries_p90':      ser('Successful defensive actions per 90'),
+        'fouls_p90':           ser('Fouls per 90'),
+        # Peer-file-only metrics (not in match-by-match export)
+        'accels_p90':          ser('Accelerations per 90'),
+        'key_passes_p90':      ser('Key passes per 90'),
+        'smart_passes_p90':    ser('Smart passes per 90'),
+        'smart_pass_acc':      ser('Accurate smart passes, %'),
+        'third_asts_p90':      ser('Third assists per 90'),
+        'deep_comp_p90':       ser('Deep completions per 90'),
+        'deep_crosses_p90':    ser('Deep completed crosses per 90'),
+        'prog_passes_p90':     ser('Progressive passes per 90'),
+        'prog_pass_acc':       ser('Accurate progressive passes, %'),
+        'lat_passes_p90':      ser('Lateral passes per 90'),
+        'lat_pass_acc':        ser('Accurate lateral passes, %'),
+        'recv_lp_p90':         ser('Received long passes per 90'),
     }
     return {k: v for k, v in out.items() if v is not None}, len(df)
 
