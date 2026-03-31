@@ -835,10 +835,14 @@ if ph is not None and len(ph) > 0:
         st.plotly_chart(fig3,use_container_width=True)
 
 # ── Form trends ───────────────────────────────────────────────────────────────
-st.markdown('<div class="section-header">Form trends · match by match (last 20 league games)</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">Form trends · match by match (last 20 starts · 60+ mins)</div>', unsafe_allow_html=True)
 
-# Limit to most recent 20 league matches (League One or League Two) for clarity
-ws = ws[ws['Competition'].str.contains('League One|League Two', na=False)].sort_values('Date', ascending=True).tail(20).reset_index(drop=True)
+# Limit to most recent 20 league starts (League One or League Two, 60+ mins) for clarity
+# Sub appearances (< 60 mins) create extreme per-game stat values that distort chart scales
+ws = ws[
+    ws['Competition'].str.contains('League One|League Two', na=False) &
+    (ws['Minutes played'] >= 60)
+].sort_values('Date', ascending=True).tail(20).reset_index(drop=True)
 
 ws['match_label']      = ws.apply(lambda r: parse_wyscout_label(r['Match'], club or club_from_file), axis=1)
 ws['duel_win_pct']     = ws.apply(lambda r: pct(r.iloc[21],r['Duels']),          axis=1)
@@ -860,12 +864,13 @@ ftab1,ftab2,ftab3,ftab4 = st.tabs(["Duels","Attacking output","Defensive output"
 
 with ftab1:
     fig_d=go.Figure()
-    fig_d.add_scatter(x=ws['match_label'],y=ws['duel_win_pct'],mode='lines+markers',name='All duel win %',
-        line=dict(color=BLUE,width=2),marker=dict(size=5),connectgaps=True,
-        hovertemplate='%{x}<br>Duel win: %{y:.0f}%<extra></extra>')
-    fig_d.add_scatter(x=ws['match_label'],y=ws['def_duel_win_pct'],mode='lines+markers',name='Def duel win %',
-        line=dict(color=RED,width=2,dash='dot'),marker=dict(size=5),connectgaps=True,
-        hovertemplate='%{x}<br>Def duel win: %{y:.0f}%<extra></extra>')
+    # Show individual game bars (opacity = minutes) plus rolling-average line
+    fig_d.add_bar(x=ws['match_label'],y=ws['duel_win_pct'],name='All duel win %',
+        marker_color=colour_list(BLUE,ws_opac),
+        customdata=ws_mins,hovertemplate='%{x}<br>Duel win: %{y:.0f}% · %{customdata:.0f} mins<extra></extra>')
+    fig_d.add_bar(x=ws['match_label'],y=ws['def_duel_win_pct'],name='Def duel win %',
+        marker_color=colour_list(RED,ws_opac),
+        customdata=ws_mins,hovertemplate='%{x}<br>Def duel win: %{y:.0f}% · %{customdata:.0f} mins<extra></extra>')
     fig_d.add_scatter(x=ws['match_label'],y=rolling_avg(ws['duel_win_pct']),mode='lines',
         name='Duel win rolling avg',line=dict(color=PURPLE,width=2),connectgaps=True,
         hovertemplate='Rolling avg: %{y:.0f}%<extra></extra>')
@@ -875,7 +880,7 @@ with ftab1:
         pavg=ws_peers['duel_win'].mean()
         fig_d.add_scatter(x=ws['match_label'],y=[pavg]*len(ws),mode='lines',
             name=f'Position avg ({pavg:.0f}%)',line=dict(color='#888',width=1.5,dash='dash'),hoverinfo='skip')
-    fig_d.update_layout(**base_layout('Duel win % (all & defensive)',height=340))
+    fig_d.update_layout(**base_layout('Duel win % (all & defensive)',height=340),barmode='group')
     fig_d.update_yaxes(range=[0,115])
     st.plotly_chart(fig_d,use_container_width=True)
 
@@ -917,7 +922,9 @@ with ftab3:
         name='Def duels rolling avg', line=dict(color=PURPLE, width=2), connectgaps=True,
         hovertemplate='Rolling avg: %{y:.1f}<extra></extra>', secondary_y=False)
 
+    _def_max = max(ws['def_duels_raw'].quantile(0.95), ws['aerial_raw'].quantile(0.95)) * 1.4
     fig_def.update_layout(**base_layout('Defensive output · per game', height=340), barmode='group')
+    fig_def.update_yaxes(secondary_y=False, range=[0, max(_def_max, 8)])
     fig_def.update_yaxes(secondary_y=True, title_text='Interceptions', showgrid=False,
         title_font=dict(size=10, color='#555'))
     st.plotly_chart(fig_def, use_container_width=True)
@@ -942,7 +949,9 @@ with ftab4:
     fig_l.add_scatter(x=ws['match_label'],y=ws['pass_acc_pct'],mode='lines+markers',name='Pass acc %',
         line=dict(color=GREEN,width=1.5),marker=dict(size=4),connectgaps=True,
         hovertemplate='%{x}<br>Pass acc: %{y:.0f}%<extra></extra>',secondary_y=True)
+    _loss_max = ws['losses_raw'].quantile(0.95) * 1.4
     fig_l.update_layout(**base_layout('Losses per game & passing accuracy',height=340))
+    fig_l.update_yaxes(secondary_y=False, range=[0, max(_loss_max, 10)])
     fig_l.update_yaxes(secondary_y=True,title_text='Pass acc %',showgrid=False,
         range=[40,105],title_font=dict(size=10,color='#555'))
     st.plotly_chart(fig_l,use_container_width=True)
