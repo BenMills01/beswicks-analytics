@@ -203,7 +203,7 @@ if ws_raw is None:
     st.error("No Wyscout sheet found in this player's file.")
     st.stop()
 
-ws     = ws_raw[ws_raw['Minutes played'] >= 20].copy()
+ws     = ws_raw.copy()
 if 'Date' in ws.columns:
     ws = ws.sort_values('Date').reset_index(drop=True)
 
